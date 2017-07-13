@@ -1,19 +1,19 @@
 #include "drape_frontend/render_group.hpp"
+#include "drape_frontend/shader_def.hpp"
 #include "drape_frontend/visual_params.hpp"
 
 #include "drape/debug_rect_renderer.hpp"
-#include "drape/shader_def.hpp"
 #include "drape/vertex_array_buffer.hpp"
 
 #include "geometry/screenbase.hpp"
 
 #include "base/stl_add.hpp"
 
-#include "std/bind.hpp"
+#include <sstream>
+#include <utility>
 
 namespace df
 {
-
 void BaseRenderGroup::SetRenderParams(ref_ptr<dp::GpuProgram> shader, ref_ptr<dp::GpuProgram> shader3d,
                                       ref_ptr<dp::UniformValuesStorage> generalUniforms)
 {
@@ -38,17 +38,11 @@ void BaseRenderGroup::Render(const ScreenBase & screen)
   dp::ApplyUniforms(*(m_generalUniforms.get()), shader);
 }
 
-bool BaseRenderGroup::IsOverlay() const
-{
-  return m_state.GetDepthLayer() == dp::GLState::OverlayLayer;
-}
-
 RenderGroup::RenderGroup(dp::GLState const & state, df::TileKey const & tileKey)
   : TBase(state, tileKey)
   , m_pendingOnDelete(false)
   , m_canBeDeleted(false)
-{
-}
+{}
 
 RenderGroup::~RenderGroup()
 {
@@ -74,6 +68,16 @@ void RenderGroup::CollectOverlay(ref_ptr<dp::OverlayTree> tree)
     renderBucket->CollectOverlayHandles(tree);
 }
 
+bool RenderGroup::HasOverlayHandles() const
+{
+  for (auto & renderBucket : m_renderBuckets)
+  {
+    if (renderBucket->HasOverlayHandles())
+      return true;
+  }
+  return false;
+}
+
 void RenderGroup::RemoveOverlay(ref_ptr<dp::OverlayTree> tree)
 {
   for (auto & renderBucket : m_renderBuckets)
@@ -88,9 +92,25 @@ void RenderGroup::Render(ScreenBase const & screen)
   for(auto & renderBucket : m_renderBuckets)
     renderBucket->GetBuffer()->Build(shader);
 
+  // Set tile-based model-view matrix.
+  {
+    math::Matrix<float, 4, 4> mv = GetTileKey().GetTileBasedModelView(screen);
+    m_uniforms.SetMatrix4x4Value("modelView", mv.m_data);
+  }
+
+  int const programIndex = m_state.GetProgramIndex();
+  int const program3dIndex = m_state.GetProgram3dIndex();
+
+  if (IsOverlay())
+  {
+    if (programIndex == gpu::COLORED_SYMBOL_PROGRAM ||
+        programIndex == gpu::COLORED_SYMBOL_BILLBOARD_PROGRAM)
+      GLFunctions::glEnable(gl_const::GLDepthTest);
+    else
+      GLFunctions::glDisable(gl_const::GLDepthTest);
+  }
+
   auto const & params = df::VisualParams::Instance().GetGlyphVisualParams();
-  int programIndex = m_state.GetProgramIndex();
-  int program3dIndex = m_state.GetProgram3dIndex();
   if (programIndex == gpu::TEXT_OUTLINED_PROGRAM ||
       program3dIndex == gpu::TEXT_OUTLINED_BILLBOARD_PROGRAM)
   {
@@ -99,13 +119,13 @@ void RenderGroup::Render(ScreenBase const & screen)
     dp::ApplyUniforms(m_uniforms, shader);
 
     for(auto & renderBucket : m_renderBuckets)
-      renderBucket->Render();
+      renderBucket->Render(m_state.GetDrawAsLine());
 
     m_uniforms.SetFloatValue("u_contrastGamma", params.m_contrast, params.m_gamma);
     m_uniforms.SetFloatValue("u_isOutlinePass", 0.0f);
     dp::ApplyUniforms(m_uniforms, shader);
     for(auto & renderBucket : m_renderBuckets)
-      renderBucket->Render();
+      renderBucket->Render(m_state.GetDrawAsLine());
   }
   else if (programIndex == gpu::TEXT_PROGRAM ||
            program3dIndex == gpu::TEXT_BILLBOARD_PROGRAM)
@@ -113,30 +133,29 @@ void RenderGroup::Render(ScreenBase const & screen)
     m_uniforms.SetFloatValue("u_contrastGamma", params.m_contrast, params.m_gamma);
     dp::ApplyUniforms(m_uniforms, shader);
     for(auto & renderBucket : m_renderBuckets)
-      renderBucket->Render();
+      renderBucket->Render(m_state.GetDrawAsLine());
   }
   else
   {
     dp::ApplyUniforms(m_uniforms, shader);
 
     for(drape_ptr<dp::RenderBucket> & renderBucket : m_renderBuckets)
-      renderBucket->Render();
+      renderBucket->Render(m_state.GetDrawAsLine());
   }
 
-#ifdef RENDER_DEBUG_RECTS
   for(auto const & renderBucket : m_renderBuckets)
     renderBucket->RenderDebug(screen);
-#endif
 }
 
 void RenderGroup::AddBucket(drape_ptr<dp::RenderBucket> && bucket)
 {
-  m_renderBuckets.push_back(move(bucket));
+  m_renderBuckets.push_back(std::move(bucket));
 }
 
-bool RenderGroup::IsLess(RenderGroup const & other) const
+bool RenderGroup::IsOverlay() const
 {
-  return m_state < other.m_state;
+  return (m_state.GetDepthLayer() == dp::GLState::OverlayLayer) ||
+         (m_state.GetDepthLayer() == dp::GLState::NavigationLayer && HasOverlayHandles());
 }
 
 bool RenderGroup::UpdateCanBeDeletedStatus(bool canBeDeleted, int currentZoom, ref_ptr<dp::OverlayTree> tree)
@@ -179,18 +198,11 @@ bool RenderGroupComparator::operator()(drape_ptr<RenderGroup> const & l, drape_p
 
     return lState < rState;
   }
-
-  if (rCanBeDeleted)
-    return true;
-
-  return false;
+  return rCanBeDeleted;
 }
 
-UserMarkRenderGroup::UserMarkRenderGroup(dp::GLState const & state,
-                                         TileKey const & tileKey,
-                                         drape_ptr<dp::RenderBucket> && bucket)
+UserMarkRenderGroup::UserMarkRenderGroup(dp::GLState const & state, TileKey const & tileKey)
   : TBase(state, tileKey)
-  , m_renderBucket(move(bucket))
   , m_animation(new OpacityAnimation(0.25 /*duration*/, 0.0 /* minValue */, 1.0 /* maxValue*/))
 {
   m_mapping.AddRangePoint(0.6, 1.3);
@@ -205,30 +217,22 @@ UserMarkRenderGroup::~UserMarkRenderGroup()
 void UserMarkRenderGroup::UpdateAnimation()
 {
   BaseRenderGroup::UpdateAnimation();
-  float t = 1.0;
+  float t = 1.0f;
   if (m_animation)
-    t = m_animation->GetOpacity();
+    t = static_cast<float>(m_animation->GetOpacity());
 
   m_uniforms.SetFloatValue("u_interpolationT", m_mapping.GetValue(t));
 }
 
-void UserMarkRenderGroup::Render(ScreenBase const & screen)
+bool UserMarkRenderGroup::IsUserPoint() const
 {
-  BaseRenderGroup::Render(screen);
-  ref_ptr<dp::GpuProgram> shader = screen.isPerspective() ? m_shader3d : m_shader;
-  dp::ApplyUniforms(m_uniforms, shader);
-  if (m_renderBucket != nullptr)
-  {
-    m_renderBucket->GetBuffer()->Build(shader);
-    m_renderBucket->Render();
-  }
+  return m_state.GetProgramIndex() != gpu::LINE_PROGRAM;
 }
 
-string DebugPrint(RenderGroup const & group)
+std::string DebugPrint(RenderGroup const & group)
 {
-  ostringstream out;
+  std::ostringstream out;
   out << DebugPrint(group.GetTileKey());
   return out.str();
 }
-
-} // namespace df
+}  // namespace df

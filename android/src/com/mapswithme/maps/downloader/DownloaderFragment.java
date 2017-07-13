@@ -1,21 +1,23 @@
 package com.mapswithme.maps.downloader;
 
-import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
+import android.support.annotation.CallSuper;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v7.widget.RecyclerView;
-import android.text.TextUtils;
 import android.view.View;
+import android.view.WindowManager;
 
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import com.mapswithme.maps.R;
 import com.mapswithme.maps.base.BaseMwmRecyclerFragment;
 import com.mapswithme.maps.base.OnBackPressListener;
 import com.mapswithme.maps.search.NativeMapSearchListener;
 import com.mapswithme.maps.search.SearchEngine;
+import com.mapswithme.maps.widget.PlaceholderView;
 
 public class DownloaderFragment extends BaseMwmRecyclerFragment
                              implements OnBackPressListener
@@ -23,6 +25,7 @@ public class DownloaderFragment extends BaseMwmRecyclerFragment
   private DownloaderToolbarController mToolbarController;
 
   private BottomPanel mBottomPanel;
+  @Nullable
   private DownloaderAdapter mAdapter;
 
   private long mCurrentSearch;
@@ -41,33 +44,32 @@ public class DownloaderFragment extends BaseMwmRecyclerFragment
 
   private final NativeMapSearchListener mSearchListener = new NativeMapSearchListener()
   {
-    private final Map<String, CountryItem> mResults = new HashMap<>();
-
     @Override
     public void onMapSearchResults(Result[] results, long timestamp, boolean isLast)
     {
       if (!mSearchRunning || timestamp != mCurrentSearch)
         return;
 
+      List<CountryItem> rs = new ArrayList<>();
       for (Result result : results)
       {
-        if (TextUtils.isEmpty(result.countryId) || mResults.containsKey(result.countryId))
-          continue;
-
         CountryItem item = CountryItem.fill(result.countryId);
         item.searchResultName = result.matchedString;
-        mResults.put(result.countryId, item);
+        rs.add(item);
       }
+
+      if (mAdapter != null)
+        mAdapter.setSearchResultsMode(rs, mToolbarController.getQuery());
 
       if (isLast)
-      {
-        mAdapter.setSearchResultsMode(mResults.values(), mToolbarController.getQuery());
-        mResults.clear();
-
         onSearchEnd();
-      }
     }
   };
+
+  boolean shouldShowSearch()
+  {
+    return CountryItem.isRoot(getCurrentRoot());
+  }
 
   void startSearch()
   {
@@ -75,11 +77,21 @@ public class DownloaderFragment extends BaseMwmRecyclerFragment
     mCurrentSearch = System.nanoTime();
     SearchEngine.searchMaps(mToolbarController.getQuery(), mCurrentSearch);
     mToolbarController.showProgress(true);
+    if (mAdapter != null)
+      mAdapter.clearAdsAndCancelMyTarget();
+  }
+
+  void clearSearchQuery()
+  {
+    mToolbarController.clear();
   }
 
   void cancelSearch()
   {
-    mAdapter.cancelSearch();
+    if (mAdapter == null || !mAdapter.isSearchResultsMode())
+      return;
+
+    mAdapter.resetSearchResultsMode();
     onSearchEnd();
   }
 
@@ -92,17 +104,21 @@ public class DownloaderFragment extends BaseMwmRecyclerFragment
 
   void update()
   {
-    String rootName = mAdapter.getCurrentParentName();
-    boolean onTop = (mAdapter.isSearchResultsMode() || rootName == null);
-
-    mToolbarController.update(onTop ? "" : rootName);
+    mToolbarController.update();
     mBottomPanel.update();
   }
 
+  @CallSuper
   @Override
-  public void onAttach(Activity activity)
+  public void onCreate(@Nullable Bundle savedInstanceState)
   {
-    super.onAttach(activity);
+    super.onCreate(savedInstanceState);
+    getActivity().getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN);
+  }
+
+  public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState)
+  {
+    super.onViewCreated(view, savedInstanceState);
     mSubscriberSlot = MapManager.nativeSubscribe(new MapManager.StorageCallback()
     {
       @Override
@@ -117,30 +133,15 @@ public class DownloaderFragment extends BaseMwmRecyclerFragment
     });
 
     SearchEngine.INSTANCE.addMapListener(mSearchListener);
-  }
-
-  @Override
-  public void onDetach()
-  {
-    super.onDetach();
-    if (mSubscriberSlot != 0)
-    {
-      MapManager.nativeUnsubscribe(mSubscriberSlot);
-      mSubscriberSlot = 0;
-    }
-
-    SearchEngine.INSTANCE.removeMapListener(mSearchListener);
-  }
-
-  @Override
-  public void onViewCreated(View view, Bundle savedInstanceState)
-  {
-    super.onViewCreated(view, savedInstanceState);
 
     getRecyclerView().addOnScrollListener(mScrollListener);
-    mAdapter.attach();
+    if (mAdapter != null)
+    {
+      mAdapter.refreshData();
+      mAdapter.attach();
+    }
 
-    mBottomPanel = new BottomPanel(this, view.findViewById(R.id.bottom_panel));
+    mBottomPanel = new BottomPanel(this, view);
     mToolbarController = new DownloaderToolbarController(view, getActivity(), this);
 
     update();
@@ -150,8 +151,17 @@ public class DownloaderFragment extends BaseMwmRecyclerFragment
   public void onDestroyView()
   {
     super.onDestroyView();
-    mAdapter.detach();
+    if (mAdapter != null)
+      mAdapter.detach();
     mAdapter = null;
+
+    if (mSubscriberSlot != 0)
+    {
+      MapManager.nativeUnsubscribe(mSubscriberSlot);
+      mSubscriberSlot = 0;
+    }
+
+    SearchEngine.INSTANCE.removeMapListener(mSearchListener);
   }
 
   @Override
@@ -171,7 +181,7 @@ public class DownloaderFragment extends BaseMwmRecyclerFragment
       return true;
     }
 
-    return mAdapter.goUpwards();
+    return mAdapter != null && mAdapter.goUpwards();
   }
 
   @Override
@@ -197,8 +207,26 @@ public class DownloaderFragment extends BaseMwmRecyclerFragment
   }
 
   @Override
+  @Nullable
   public DownloaderAdapter getAdapter()
   {
     return mAdapter;
+  }
+
+  @NonNull
+  String getCurrentRoot()
+  {
+    return mAdapter != null ? mAdapter.getCurrentRootId() : "";
+  }
+
+  @Override
+  protected void setupPlaceholder(@NonNull PlaceholderView placeholder)
+  {
+    if (mAdapter != null && mAdapter.isSearchResultsMode())
+      placeholder.setContent(R.drawable.img_search_nothing_found_light,
+                             R.string.search_not_found, R.string.search_not_found_query);
+    else
+      placeholder.setContent(R.drawable.img_search_no_maps,
+                             R.string.downloader_no_downloaded_maps_title, R.string.downloader_no_downloaded_maps_message);
   }
 }

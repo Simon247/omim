@@ -3,6 +3,8 @@ typedef NS_ENUM(NSUInteger, MWMButtonColoring)
   MWMButtonColoringOther,
   MWMButtonColoringBlue,
   MWMButtonColoringBlack,
+  MWMButtonColoringWhite,
+  MWMButtonColoringWhiteText,
   MWMButtonColoringGray
 };
 

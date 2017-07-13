@@ -3,42 +3,42 @@
 #include "qt/mainwindow.hpp"
 #include "qt/osm_auth_dialog.hpp"
 #include "qt/preferences_dialog.hpp"
+#include "qt/qt_common/helpers.hpp"
+#include "qt/qt_common/scale_slider.hpp"
 #include "qt/search_panel.hpp"
-#include "qt/slider_ctrl.hpp"
-
-#include "defines.hpp"
 
 #include "platform/settings.hpp"
 #include "platform/platform.hpp"
 
-#include "std/bind.hpp"
-#include "std/sstream.hpp"
+#include "defines.hpp"
+
+#include <sstream>
+
 #include "std/target_os.hpp"
 
+#ifdef BUILD_DESIGNER
+#include "build_style/build_common.h"
+#include "build_style/build_phone_pack.h"
+#include "build_style/build_style.h"
+#include "build_style/build_statistics.h"
+#include "build_style/run_tests.h"
+
+#include "drape/debug_rect_renderer.hpp"
+#endif // BUILD_DESIGNER
+
 #include <QtGui/QCloseEvent>
-
-#if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
-  #include <QtGui/QAction>
-  #include <QtGui/QDesktopWidget>
-  #include <QtGui/QDockWidget>
-  #include <QtGui/QMenu>
-  #include <QtGui/QMenuBar>
-  #include <QtGui/QToolBar>
-  #include <QtGui/QPushButton>
-  #include <QtGui/QHBoxLayout>
-  #include <QtGui/QLabel>
-#else
-  #include <QtWidgets/QAction>
-  #include <QtWidgets/QDesktopWidget>
-  #include <QtWidgets/QDockWidget>
-  #include <QtWidgets/QMenu>
-  #include <QtWidgets/QMenuBar>
-  #include <QtWidgets/QToolBar>
-  #include <QtWidgets/QPushButton>
-  #include <QtWidgets/QHBoxLayout>
-  #include <QtWidgets/QLabel>
-#endif
-
+#include <QtWidgets/QAction>
+#include <QtWidgets/QDesktopWidget>
+#include <QtWidgets/QDockWidget>
+#include <QtWidgets/QFileDialog>
+#include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QLabel>
+#include <QtWidgets/QMenu>
+#include <QtWidgets/QMenuBar>
+#include <QtWidgets/QMessageBox>
+#include <QtWidgets/QPushButton>
+#include <QtWidgets/QToolBar>
+#include <QtWidgets/QToolButton>
 
 #define IDM_ABOUT_DIALOG        1001
 #define IDM_PREFERENCES_DIALOG  1002
@@ -53,40 +53,24 @@
 
 #endif // NO_DOWNLOADER
 
-
 namespace qt
 {
-
 // Defined in osm_auth_dialog.cpp.
 extern char const * kTokenKeySetting;
 extern char const * kTokenSecretSetting;
 
-MainWindow::MainWindow() : m_locationService(CreateDesktopLocationService(*this))
+MainWindow::MainWindow(Framework & framework, bool apiOpenGLES3, QString const & mapcssFilePath /*= QString()*/)
+  : m_Docks{}
+  , m_locationService(CreateDesktopLocationService(*this))
+#ifdef BUILD_DESIGNER
+  , m_mapcssFilePath(mapcssFilePath)
+#endif
 {
   // Always runs on the first desktop
   QDesktopWidget const * desktop(QApplication::desktop());
   setGeometry(desktop->screenGeometry(desktop->primaryScreen()));
 
-  m_pDrawWidget = new DrawWidget(this);
-  QSurfaceFormat format = m_pDrawWidget->format();
-
-  format.setMajorVersion(2);
-  format.setMinorVersion(1);
-
-  format.setAlphaBufferSize(8);
-  format.setBlueBufferSize(8);
-  format.setGreenBufferSize(8);
-  format.setRedBufferSize(8);
-  format.setStencilBufferSize(0);
-  format.setSamples(0);
-  format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
-  format.setSwapInterval(1);
-  format.setDepthBufferSize(16);
-
-  format.setProfile(QSurfaceFormat::CompatibilityProfile);
-  //format.setOption(QSurfaceFormat::DebugContext);
-  m_pDrawWidget->setFormat(format);
-  m_pDrawWidget->setMouseTracking(true);
+  m_pDrawWidget = new DrawWidget(framework, apiOpenGLES3, this);
   setCentralWidget(m_pDrawWidget);
 
   QObject::connect(m_pDrawWidget, SIGNAL(BeforeEngineCreation()), this, SLOT(OnBeforeEngineCreation()));
@@ -95,7 +79,13 @@ MainWindow::MainWindow() : m_locationService(CreateDesktopLocationService(*this)
   CreateNavigationBar();
   CreateSearchBarAndPanel();
 
-  setWindowTitle(tr("MAPS.ME"));
+  QString caption = qAppName();
+#ifdef BUILD_DESIGNER
+  if (!m_mapcssFilePath.isEmpty())
+    caption += QString(" - ") + m_mapcssFilePath;
+#endif
+
+  setWindowTitle(caption);
   setWindowIcon(QIcon(":/ui/logo.png"));
 
 #ifndef OMIM_OS_WINDOWS
@@ -119,7 +109,7 @@ MainWindow::MainWindow() : m_locationService(CreateDesktopLocationService(*this)
     item.cch = prefsStr.size();
     ::InsertMenuItemA(menu, ::GetMenuItemCount(menu) - 1, TRUE, &item);
     item.wID = IDM_ABOUT_DIALOG;
-    QByteArray const aboutStr = tr("About MAPS.ME...").toLocal8Bit();
+    QByteArray const aboutStr = tr("About...").toLocal8Bit();
     item.dwTypeData = const_cast<char *>(aboutStr.data());
     item.cch = aboutStr.size();
     ::InsertMenuItemA(menu, ::GetMenuItemCount(menu) - 1, TRUE, &item);
@@ -151,7 +141,7 @@ MainWindow::MainWindow() : m_locationService(CreateDesktopLocationService(*this)
 
     if (!text.empty())
     {
-      InfoDialog welcomeDlg(tr("Welcome to MAPS.ME!"), text.c_str(),
+      InfoDialog welcomeDlg(QString("Welcome to ") + qAppName(), text.c_str(),
                             this, QStringList(tr("Download Maps")));
       if (welcomeDlg.exec() == QDialog::Rejected)
         bShowUpdateDialog = false;
@@ -189,7 +179,7 @@ bool MainWindow::winEvent(MSG * msg, long * result)
 
 void MainWindow::LocationStateModeChanged(location::EMyPositionMode mode)
 {
-  if (mode == location::MODE_PENDING_POSITION)
+  if (mode == location::PendingPosition)
   {
     m_locationService->Start();
     m_pMyPositionAction->setIcon(QIcon(":/navig64/location-search.png"));
@@ -197,60 +187,51 @@ void MainWindow::LocationStateModeChanged(location::EMyPositionMode mode)
     return;
   }
 
-  if (mode == location::MODE_UNKNOWN_POSITION)
-    m_locationService->Stop();
-
   m_pMyPositionAction->setIcon(QIcon(":/navig64/location.png"));
   m_pMyPositionAction->setToolTip(tr("My Position"));
 }
 
 namespace
 {
-  struct button_t
-  {
-    QString name;
-    char const * icon;
-    char const * slot;
-  };
+struct button_t
+{
+  QString name;
+  char const * icon;
+  char const * slot;
+};
 
-  void add_buttons(QToolBar * pBar, button_t buttons[], size_t count, QObject * pReceiver)
+void add_buttons(QToolBar * pBar, button_t buttons[], size_t count, QObject * pReceiver)
+{
+  for (size_t i = 0; i < count; ++i)
   {
-    for (size_t i = 0; i < count; ++i)
-    {
-      if (buttons[i].icon)
-        pBar->addAction(QIcon(buttons[i].icon), buttons[i].name, pReceiver, buttons[i].slot);
-      else
-        pBar->addSeparator();
-    }
-  }
-
-  struct hotkey_t
-  {
-    int key;
-    char const * slot;
-  };
-
-  void FormatMapSize(uint64_t sizeInBytes, string & units, size_t & sizeToDownload)
-  {
-    int const mbInBytes = 1024 * 1024;
-    int const kbInBytes = 1024;
-    if (sizeInBytes > mbInBytes)
-    {
-      sizeToDownload = (sizeInBytes + mbInBytes - 1) / mbInBytes;
-      units = "MB";
-    }
-    else if (sizeInBytes > kbInBytes)
-    {
-      sizeToDownload = (sizeInBytes + kbInBytes -1) / kbInBytes;
-      units = "KB";
-    }
+    if (buttons[i].icon)
+      pBar->addAction(QIcon(buttons[i].icon), buttons[i].name, pReceiver, buttons[i].slot);
     else
-    {
-      sizeToDownload = sizeInBytes;
-      units = "B";
-    }
+      pBar->addSeparator();
   }
 }
+
+void FormatMapSize(uint64_t sizeInBytes, string & units, size_t & sizeToDownload)
+{
+  int const mbInBytes = 1024 * 1024;
+  int const kbInBytes = 1024;
+  if (sizeInBytes > mbInBytes)
+  {
+    sizeToDownload = (sizeInBytes + mbInBytes - 1) / mbInBytes;
+    units = "MB";
+  }
+  else if (sizeInBytes > kbInBytes)
+  {
+    sizeToDownload = (sizeInBytes + kbInBytes -1) / kbInBytes;
+    units = "KB";
+  }
+  else
+  {
+    sizeToDownload = sizeInBytes;
+    units = "B";
+  }
+}
+}  // namespace
 
 void MainWindow::CreateNavigationBar()
 {
@@ -259,43 +240,96 @@ void MainWindow::CreateNavigationBar()
   pToolBar->setIconSize(QSize(32, 32));
 
   {
+    m_pDrawWidget->BindHotkeys(*this);
+
     // Add navigation hot keys.
-    hotkey_t const arr[] = {
-      { Qt::Key_Equal, SLOT(ScalePlus()) },
-      { Qt::Key_Minus, SLOT(ScaleMinus()) },
-      { Qt::ALT + Qt::Key_Equal, SLOT(ScalePlusLight()) },
-      { Qt::ALT + Qt::Key_Minus, SLOT(ScaleMinusLight()) },
+    qt::common::Hotkey const hotkeys[] = {
       { Qt::Key_A, SLOT(ShowAll()) },
       // Use CMD+n (New Item hotkey) to activate Create Feature mode.
       { Qt::Key_Escape, SLOT(ChoosePositionModeDisable()) }
     };
 
-    for (size_t i = 0; i < ARRAY_SIZE(arr); ++i)
+    for (auto const & hotkey : hotkeys)
     {
       QAction * pAct = new QAction(this);
-      pAct->setShortcut(QKeySequence(arr[i].key));
-      connect(pAct, SIGNAL(triggered()), m_pDrawWidget, arr[i].slot);
+      pAct->setShortcut(QKeySequence(hotkey.m_key));
+      connect(pAct, SIGNAL(triggered()), m_pDrawWidget, hotkey.m_slot);
       addAction(pAct);
     }
   }
 
   {
+    m_trafficEnableAction = pToolBar->addAction(QIcon(":/navig64/traffic.png"), tr("Show traffic"),
+                                                this, SLOT(OnTrafficEnabled()));
+    m_trafficEnableAction->setCheckable(true);
+    m_trafficEnableAction->setChecked(m_pDrawWidget->GetFramework().LoadTrafficEnabled());
+    pToolBar->addSeparator();
+
+#ifndef BUILD_DESIGNER
+    m_selectStartRoutePoint = new QAction(QIcon(":/navig64/point-start.png"),
+                                          tr("Start point"), this);
+    connect(m_selectStartRoutePoint, SIGNAL(triggered()), this, SLOT(OnStartPointSelected()));
+
+    m_selectFinishRoutePoint = new QAction(QIcon(":/navig64/point-finish.png"),
+                                           tr("Finish point"), this);
+    connect(m_selectFinishRoutePoint, SIGNAL(triggered()), this, SLOT(OnFinishPointSelected()));
+
+    m_selectIntermediateRoutePoint = new QAction(QIcon(":/navig64/point-intermediate.png"),
+                                                 tr("Intermediate point"), this);
+    connect(m_selectIntermediateRoutePoint, SIGNAL(triggered()), this, SLOT(OnIntermediatePointSelected()));
+
+    auto routePointsMenu = new QMenu();
+    routePointsMenu->addAction(m_selectStartRoutePoint);
+    routePointsMenu->addAction(m_selectFinishRoutePoint);
+    routePointsMenu->addAction(m_selectIntermediateRoutePoint);
+    m_routePointsToolButton = new QToolButton();
+    m_routePointsToolButton->setPopupMode(QToolButton::MenuButtonPopup);
+    m_routePointsToolButton->setMenu(routePointsMenu);
+    switch (m_pDrawWidget->GetRoutePointAddMode())
+    {
+    case RouteMarkType::Start:
+      m_routePointsToolButton->setIcon(m_selectStartRoutePoint->icon());
+      break;
+    case RouteMarkType::Finish:
+      m_routePointsToolButton->setIcon(m_selectFinishRoutePoint->icon());
+      break;
+    case RouteMarkType::Intermediate:
+      m_routePointsToolButton->setIcon(m_selectIntermediateRoutePoint->icon());
+      break;
+    }
+    pToolBar->addWidget(m_routePointsToolButton);
+    auto routingAction = pToolBar->addAction(QIcon(":/navig64/routing.png"), tr("Follow route"),
+                                             this, SLOT(OnFollowRoute()));
+    routingAction->setToolTip(tr("Follow route"));
+    auto clearAction = pToolBar->addAction(QIcon(":/navig64/clear-route.png"), tr("Clear route"),
+                                           this, SLOT(OnClearRoute()));
+    clearAction->setToolTip(tr("Clear route"));
+    pToolBar->addSeparator();
+
     // TODO(AlexZ): Replace icon.
-    m_pCreateFeatureAction = pToolBar->addAction(QIcon(":/navig64/select.png"),
-                                           tr("Create Feature"),
-                                           this,
-                                           SLOT(OnCreateFeatureClicked()));
+    m_pCreateFeatureAction = pToolBar->addAction(QIcon(":/navig64/select.png"), tr("Create Feature"),
+                                                 this, SLOT(OnCreateFeatureClicked()));
     m_pCreateFeatureAction->setCheckable(true);
     m_pCreateFeatureAction->setToolTip(tr("Please select position on a map."));
     m_pCreateFeatureAction->setShortcut(QKeySequence::New);
 
     pToolBar->addSeparator();
 
+    m_selectionMode = pToolBar->addAction(QIcon(":/navig64/selectmode.png"), tr("Selection mode"),
+                                          this, SLOT(OnSwitchSelectionMode()));
+    m_selectionMode->setCheckable(true);
+    m_selectionMode->setToolTip(tr("Turn on/off selection mode"));
+
+    m_clearSelection = pToolBar->addAction(QIcon(":/navig64/clear.png"), tr("Clear selection"),
+                                           this, SLOT(OnClearSelection()));
+    m_clearSelection->setToolTip(tr("Clear selection"));
+
+    pToolBar->addSeparator();
+#endif // NOT BUILD_DESIGNER
+
     // Add search button with "checked" behavior.
-    m_pSearchAction = pToolBar->addAction(QIcon(":/navig64/search.png"),
-                                           tr("Search"),
-                                           this,
-                                           SLOT(OnSearchButtonClicked()));
+    m_pSearchAction = pToolBar->addAction(QIcon(":/navig64/search.png"), tr("Search"),
+                                          this, SLOT(OnSearchButtonClicked()));
     m_pSearchAction->setCheckable(true);
     m_pSearchAction->setToolTip(tr("Offline Search"));
     m_pSearchAction->setShortcut(QKeySequence::Find);
@@ -313,30 +347,62 @@ void MainWindow::CreateNavigationBar()
     m_pMyPositionAction->setToolTip(tr("My Position"));
 // #endif
 
-    // add view actions 1
-    button_t arr[] = {
-      { QString(), 0, 0 },
-      //{ tr("Show all"), ":/navig64/world.png", SLOT(ShowAll()) },
-      { tr("Scale +"), ":/navig64/plus.png", SLOT(ScalePlus()) }
-    };
-    add_buttons(pToolBar, arr, ARRAY_SIZE(arr), m_pDrawWidget);
+#ifdef BUILD_DESIGNER
+    // Add "Build style" button
+    if (!m_mapcssFilePath.isEmpty())
+    {
+      m_pBuildStyleAction = pToolBar->addAction(QIcon(":/navig64/run.png"),
+                                                tr("Build style"),
+                                                this,
+                                                SLOT(OnBuildStyle()));
+      m_pBuildStyleAction->setCheckable(false);
+      m_pBuildStyleAction->setToolTip(tr("Build style"));
+
+      m_pRecalculateGeomIndex = pToolBar->addAction(QIcon(":/navig64/geom.png"),
+                                                    tr("Recalculate geometry index"),
+                                                    this,
+                                                    SLOT(OnRecalculateGeomIndex()));
+      m_pRecalculateGeomIndex->setCheckable(false);
+      m_pRecalculateGeomIndex->setToolTip(tr("Recalculate geometry index"));
+    }
+
+    // Add "Debug style" button
+    m_pDrawDebugRectAction = pToolBar->addAction(QIcon(":/navig64/bug.png"),
+                                              tr("Debug style"),
+                                              this,
+                                              SLOT(OnDebugStyle()));
+    m_pDrawDebugRectAction->setCheckable(true);
+    m_pDrawDebugRectAction->setChecked(false);
+    m_pDrawDebugRectAction->setToolTip(tr("Debug style"));
+    dp::DebugRectRenderer::Instance().SetEnabled(false);
+
+    // Add "Get statistics" button
+    m_pGetStatisticsAction = pToolBar->addAction(QIcon(":/navig64/chart.png"),
+                                                 tr("Get statistics"),
+                                                 this,
+                                                 SLOT(OnGetStatistics()));
+    m_pGetStatisticsAction->setCheckable(false);
+    m_pGetStatisticsAction->setToolTip(tr("Get statistics"));
+
+    // Add "Run tests" button
+    m_pRunTestsAction = pToolBar->addAction(QIcon(":/navig64/test.png"),
+                                            tr("Run tests"),
+                                            this,
+                                            SLOT(OnRunTests()));
+    m_pRunTestsAction->setCheckable(false);
+    m_pRunTestsAction->setToolTip(tr("Run tests"));
+
+    // Add "Build phone package" button
+    m_pBuildPhonePackAction = pToolBar->addAction(QIcon(":/navig64/phonepack.png"),
+                                                  tr("Build phone package"),
+                                                  this,
+                                                  SLOT(OnBuildPhonePackage()));
+    m_pBuildPhonePackAction->setCheckable(false);
+    m_pBuildPhonePackAction->setToolTip(tr("Build phone package"));
+#endif // BUILD_DESIGNER
   }
 
-  // add scale slider
-  QScaleSlider * pScale = new QScaleSlider(Qt::Vertical, this, 20);
-  pScale->SetRange(2, scales::GetUpperScale());
-  pScale->setTickPosition(QSlider::TicksRight);
-
-  pToolBar->addWidget(pScale);
-  m_pDrawWidget->SetScaleControl(pScale);
-
-  {
-    // add view actions 2
-    button_t arr[] = {
-      { tr("Scale -"), ":/navig64/minus.png", SLOT(ScaleMinus()) }
-    };
-    add_buttons(pToolBar, arr, ARRAY_SIZE(arr), m_pDrawWidget);
-  }
+  qt::common::ScaleSlider::Embed(Qt::Vertical, *pToolBar, *m_pDrawWidget);
 
 #ifndef NO_DOWNLOADER
   {
@@ -394,7 +460,7 @@ void MainWindow::CreateCountryStatusControls()
         string units;
         size_t sizeToDownload = 0;
         FormatMapSize(sizeInBytes, units, sizeToDownload);
-        stringstream str;
+        std::stringstream str;
         str << "Download (" << countryName << ") " << sizeToDownload << units;
         m_downloadButton->setText(str.str().c_str());
       }
@@ -404,7 +470,7 @@ void MainWindow::CreateCountryStatusControls()
         m_retryButton->setVisible(false);
         m_downloadingStatusLabel->setVisible(true);
 
-        stringstream str;
+        std::stringstream str;
         str << "Downloading (" << countryName << ") " << (int)progress << "%";
         m_downloadingStatusLabel->setText(str.str().c_str());
       }
@@ -414,7 +480,7 @@ void MainWindow::CreateCountryStatusControls()
         m_retryButton->setVisible(false);
         m_downloadingStatusLabel->setVisible(true);
 
-        stringstream str;
+        std::stringstream str;
         str << countryName << " is waiting for downloading";
         m_downloadingStatusLabel->setText(str.str().c_str());
       }
@@ -424,7 +490,7 @@ void MainWindow::CreateCountryStatusControls()
         m_retryButton->setVisible(true);
         m_downloadingStatusLabel->setVisible(false);
 
-        stringstream str;
+        std::stringstream str;
         str << "Retry to download " << countryName;
         m_retryButton->setText(str.str().c_str());
       }
@@ -478,6 +544,12 @@ void MainWindow::OnCreateFeatureClicked()
   }
 }
 
+void MainWindow::OnSwitchSelectionMode()
+{
+  m_pDrawWidget->SetSelectionMode(m_selectionMode->isChecked());
+}
+
+void MainWindow::OnClearSelection() { m_pDrawWidget->GetFramework().GetDrapeApi().Clear(); }
 void MainWindow::OnSearchButtonClicked()
 {
   if (m_pSearchAction->isChecked())
@@ -495,10 +567,11 @@ void MainWindow::OnLoginMenuItem()
 void MainWindow::OnUploadEditsMenuItem()
 {
   string key, secret;
-  settings::Get(kTokenKeySetting, key);
-  settings::Get(kTokenSecretSetting, secret);
-  if (key.empty() || secret.empty())
+  if (!settings::Get(kTokenKeySetting, key) || key.empty() ||
+      !settings::Get(kTokenSecretSetting, secret) || secret.empty())
+  {
     OnLoginMenuItem();
+  }
   else
   {
     auto & editor = osm::Editor::Instance();
@@ -509,7 +582,7 @@ void MainWindow::OnUploadEditsMenuItem()
 
 void MainWindow::OnBeforeEngineCreation()
 {
-  m_pDrawWidget->GetFramework().SetMyPositionModeListener([this](location::EMyPositionMode mode)
+  m_pDrawWidget->GetFramework().SetMyPositionModeListener([this](location::EMyPositionMode mode, bool routingActive)
   {
     LocationStateModeChanged(mode);
   });
@@ -524,11 +597,158 @@ void MainWindow::OnPreferences()
   m_pDrawWidget->GetFramework().EnterForeground();
 }
 
+#ifdef BUILD_DESIGNER
+void MainWindow::OnBuildStyle()
+{
+  try
+  {
+    build_style::BuildAndApply(m_mapcssFilePath);
+    // m_pDrawWidget->RefreshDrawingRules();
+
+    bool enabled;
+    if (!settings::Get(kEnabledAutoRegenGeomIndex, enabled))
+      enabled = false;
+
+    if (enabled)
+    {
+      build_style::NeedRecalculate = true;
+      QMainWindow::close();
+    }
+  }
+  catch (std::exception & e)
+  {
+    QMessageBox msgBox;
+    msgBox.setWindowTitle("Error");
+    msgBox.setText(e.what());
+    msgBox.setStandardButtons(QMessageBox::Ok);
+    msgBox.setDefaultButton(QMessageBox::Ok);
+    msgBox.exec();
+  }
+}
+
+void MainWindow::OnRecalculateGeomIndex()
+{
+  try
+  {
+    QMessageBox msgBox;
+    msgBox.setWindowTitle("Warning");
+    msgBox.setText("Geometry index will be regenerated. It can take a while.\nApplication may be closed and reopened!");
+    msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    msgBox.setDefaultButton(QMessageBox::Yes);
+    if (msgBox.exec() == QMessageBox::Yes)
+    {
+      build_style::NeedRecalculate = true;
+      QMainWindow::close();
+    }
+  }
+  catch (std::exception & e)
+  {
+    QMessageBox msgBox;
+    msgBox.setWindowTitle("Error");
+    msgBox.setText(e.what());
+    msgBox.setStandardButtons(QMessageBox::Ok);
+    msgBox.setDefaultButton(QMessageBox::Ok);
+    msgBox.exec();
+  }
+}
+
+void MainWindow::OnDebugStyle()
+{
+  bool const checked = m_pDrawDebugRectAction->isChecked();
+  dp::DebugRectRenderer::Instance().SetEnabled(checked);
+  m_pDrawWidget->RefreshDrawingRules();
+}
+
+void MainWindow::OnGetStatistics()
+{
+  try
+  {
+    QString text = build_style::GetCurrentStyleStatistics();
+    InfoDialog dlg(QString("Style statistics"), text, NULL);
+    dlg.exec();
+  }
+  catch (std::exception & e)
+  {
+    QMessageBox msgBox;
+    msgBox.setWindowTitle("Error");
+    msgBox.setText(e.what());
+    msgBox.setStandardButtons(QMessageBox::Ok);
+    msgBox.setDefaultButton(QMessageBox::Ok);
+    msgBox.exec();
+  }
+}
+
+void MainWindow::OnRunTests()
+{
+  try
+  {
+    pair<bool, QString> res = build_style::RunCurrentStyleTests();
+    InfoDialog dlg(QString("Style tests: ") + (res.first ? "OK" : "FAILED"), res.second, NULL);
+    dlg.exec();
+  }
+  catch (std::exception & e)
+  {
+    QMessageBox msgBox;
+    msgBox.setWindowTitle("Error");
+    msgBox.setText(e.what());
+    msgBox.setStandardButtons(QMessageBox::Ok);
+    msgBox.setDefaultButton(QMessageBox::Ok);
+    msgBox.exec();
+  }
+}
+
+void MainWindow::OnBuildPhonePackage()
+{
+  try
+  {
+    char const * const kStylesFolder = "styles";
+    char const * const kClearStyleFolder = "clear";
+
+    QString const targetDir = QFileDialog::getExistingDirectory(nullptr, "Choose output directory");
+    if (targetDir.isEmpty())
+      return;
+    auto outDir = QDir(JoinFoldersToPath({targetDir, kStylesFolder}));
+    if (outDir.exists())
+    {
+      QMessageBox msgBox;
+      msgBox.setWindowTitle("Warning");
+      msgBox.setText(QString("Folder ") + outDir.absolutePath() + " will be deleted?");
+      msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+      msgBox.setDefaultButton(QMessageBox::No);
+      auto result = msgBox.exec();
+      if (result == QMessageBox::No)
+        throw std::runtime_error(std::string("Target directory exists: ") + outDir.absolutePath().toStdString());
+    }
+
+    QString const stylesDir = JoinFoldersToPath({m_mapcssFilePath, "..", "..", ".."});
+    if (!QDir(JoinFoldersToPath({stylesDir, kClearStyleFolder})).exists())
+      throw std::runtime_error(std::string("Styles folder is not found in ") + stylesDir.toStdString());
+
+    QString text = build_style::RunBuildingPhonePack(stylesDir, targetDir);
+    text.append("\nMobile device style package is in the directory: ");
+    text.append(JoinFoldersToPath({targetDir, kStylesFolder}));
+    text.append(". Copy it to your mobile device.\n");
+    InfoDialog dlg(QString("Building phone pack"), text, nullptr);
+    dlg.exec();
+  }
+  catch (std::exception & e)
+  {
+    QMessageBox msgBox;
+    msgBox.setWindowTitle("Error");
+    msgBox.setText(e.what());
+    msgBox.setStandardButtons(QMessageBox::Ok);
+    msgBox.setDefaultButton(QMessageBox::Ok);
+    msgBox.exec();
+  }
+}
+#endif // BUILD_DESIGNER
+
 #ifndef NO_DOWNLOADER
 void MainWindow::ShowUpdateDialog()
 {
   UpdateDialog dlg(this, m_pDrawWidget->GetFramework());
   dlg.ShowModal();
+  m_pDrawWidget->update();
 }
 
 #endif // NO_DOWNLOADER
@@ -544,7 +764,7 @@ void MainWindow::CreateSearchBarAndPanel()
 void MainWindow::CreatePanelImpl(size_t i, Qt::DockWidgetArea area, QString const & name,
                                  QKeySequence const & hotkey, char const * slot)
 {
-  ASSERT_LESS(i, ARRAY_SIZE(m_Docks), ());
+  ASSERT_LESS(i, m_Docks.size(), ());
   m_Docks[i] = new QDockWidget(name, this);
 
   addDockWidget(area, m_Docks[i]);
@@ -578,4 +798,44 @@ void MainWindow::OnRetryDownloadClicked()
   m_pDrawWidget->RetryToDownloadCountry(m_lastCountry);
 }
 
+void MainWindow::OnTrafficEnabled()
+{
+  bool const enabled = m_trafficEnableAction->isChecked();
+  m_pDrawWidget->GetFramework().GetTrafficManager().SetEnabled(enabled);
+  m_pDrawWidget->GetFramework().SaveTrafficEnabled(enabled);
 }
+
+void MainWindow::OnStartPointSelected()
+{
+  m_routePointsToolButton->setIcon(m_selectStartRoutePoint->icon());
+  m_pDrawWidget->SetRoutePointAddMode(RouteMarkType::Start);
+}
+
+void MainWindow::OnFinishPointSelected()
+{
+  m_routePointsToolButton->setIcon(m_selectFinishRoutePoint->icon());
+  m_pDrawWidget->SetRoutePointAddMode(RouteMarkType::Finish);
+}
+
+void MainWindow::OnIntermediatePointSelected()
+{
+  m_routePointsToolButton->setIcon(m_selectIntermediateRoutePoint->icon());
+  m_pDrawWidget->SetRoutePointAddMode(RouteMarkType::Intermediate);
+}
+
+void MainWindow::OnFollowRoute()
+{
+  m_pDrawWidget->FollowRoute();
+}
+
+void MainWindow::OnClearRoute()
+{
+  m_pDrawWidget->ClearRoute();
+}
+
+// static
+void MainWindow::SetDefaultSurfaceFormat(bool apiOpenGLES3)
+{
+  DrawWidget::SetDefaultSurfaceFormat(apiOpenGLES3);
+}
+}  // namespace qt

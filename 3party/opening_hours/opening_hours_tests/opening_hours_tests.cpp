@@ -665,11 +665,6 @@ BOOST_AUTO_TEST_CASE(OpeningHours_RuleSequence)
 BOOST_AUTO_TEST_CASE(OpeningHoursTimerange_TestParseUnparse)
 {
   {
-    auto const rule = "06:00";
-    auto const parsedUnparsed = ParseAndUnparse<osmoh::TTimespans>(rule);
-    BOOST_CHECK_EQUAL(parsedUnparsed, rule);
-  }
-  {
     auto const rule = "06:00+";
     auto const parsedUnparsed = ParseAndUnparse<osmoh::TTimespans>(rule);
     BOOST_CHECK_EQUAL(parsedUnparsed, rule);
@@ -700,9 +695,9 @@ BOOST_AUTO_TEST_CASE(OpeningHoursTimerange_TestParseUnparse)
     BOOST_CHECK_EQUAL(parsedUnparsed, rule);
   }
   {
-    auto const rule = "dusk";
+    auto const rule = "dusk+";
     auto const parsedUnparsed = ParseAndUnparse<osmoh::TTimespans>(rule);
-    BOOST_CHECK_EQUAL(parsedUnparsed, "sunset");
+    BOOST_CHECK_EQUAL(parsedUnparsed, "sunset+");
   }
   {
     auto const rule = "dawn+";
@@ -715,7 +710,7 @@ BOOST_AUTO_TEST_CASE(OpeningHoursTimerange_TestParseUnparse)
     BOOST_CHECK_EQUAL(parsedUnparsed, rule);
   }
   {
-    auto const rule = "(sunset-12:12)";
+    auto const rule = "(sunset-12:12)+";
     auto const parsedUnparsed = ParseAndUnparse<osmoh::TTimespans>(rule);
     BOOST_CHECK_EQUAL(parsedUnparsed, rule);
   }
@@ -925,6 +920,11 @@ BOOST_AUTO_TEST_CASE(OpeningHoursWeekRanges_TestParseUnparse)
 BOOST_AUTO_TEST_CASE(OpeningHoursRuleSequence_TestParseUnparse)
 {
   {
+    auto const rule = "";
+    auto const parsedUnparsed = ParseAndUnparse<osmoh::TRuleSequences>(rule);
+    BOOST_CHECK_EQUAL(parsedUnparsed, rule);
+  }
+  {
     auto const rule = "24/7";
     auto const parsedUnparsed = ParseAndUnparse<osmoh::TRuleSequences>(rule);
     BOOST_CHECK_EQUAL(parsedUnparsed, rule);
@@ -1000,7 +1000,7 @@ BOOST_AUTO_TEST_CASE(OpeningHoursRuleSequence_TestParseUnparse)
     BOOST_CHECK_EQUAL(parsedUnparsed, rule);
   }
   {
-    auto const rule = "06:00-02:00/21:03, 18:15";
+    auto const rule = "06:00-02:00/21:03, 18:15-sunset";
     auto const parsedUnparsed = ParseAndUnparse<osmoh::TRuleSequences>(rule);
     BOOST_CHECK_EQUAL(parsedUnparsed, rule);
   }
@@ -1043,7 +1043,7 @@ BOOST_AUTO_TEST_CASE(OpeningHoursRuleSequence_TestParseUnparse)
     BOOST_CHECK_EQUAL(parsedUnparsed, rule);
   }
   {
-    auto const rule = "Su-Th (sunset-24:00); Fr-Sa (sunrise+12:12)";
+    auto const rule = "Su-Th sunrise-(sunset-24:00); Fr-Sa (sunrise+12:12)-sunset";
     auto const parsedUnparsed = ParseAndUnparse<osmoh::TRuleSequences>(rule);
     BOOST_CHECK_EQUAL(parsedUnparsed, rule);
   }
@@ -1073,6 +1073,12 @@ BOOST_AUTO_TEST_CASE(OpeningHoursRuleSequence_TestParseUnparse)
   }
   {
     auto const rule = "Sa; Su";
+
+    auto const parsedUnparsed = ParseAndUnparse<osmoh::TRuleSequences>(rule);
+    BOOST_CHECK_EQUAL(parsedUnparsed, rule);
+  }
+  {
+    auto const rule = "Sa-Su 00:00-24:00";
 
     auto const parsedUnparsed = ParseAndUnparse<osmoh::TRuleSequences>(rule);
     BOOST_CHECK_EQUAL(parsedUnparsed, rule);
@@ -1426,6 +1432,46 @@ BOOST_AUTO_TEST_CASE(OpeningHours_TestIsActive)
     BOOST_CHECK(GetTimeTuple("2015-11-11 06:01", kDateTimeFmt, time));
     BOOST_CHECK(!IsActive(rules[0], time));
   }
+  {
+    TRuleSequences rules;
+    BOOST_CHECK(Parse("Mo-We 00:00-24:00", rules));
+
+    std::tm time{};
+    BOOST_CHECK(GetTimeTuple("2016-10-03 05:35", kDateTimeFmt, time));
+    BOOST_CHECK(IsActive(rules[0], time));
+
+    BOOST_CHECK(GetTimeTuple("2017-01-17 15:35", kDateTimeFmt, time));
+    BOOST_CHECK(IsActive(rules[0], time));
+
+    BOOST_CHECK(GetTimeTuple("2017-05-31 23:35", kDateTimeFmt, time));
+    BOOST_CHECK(IsActive(rules[0], time));
+
+    BOOST_CHECK(GetTimeTuple("2017-02-10 05:35", kDateTimeFmt, time));
+    BOOST_CHECK(!IsActive(rules[0], time));
+
+    BOOST_CHECK(GetTimeTuple("2017-05-21 06:01", kDateTimeFmt, time));
+    BOOST_CHECK(!IsActive(rules[0], time));
+  }
+  {
+    TRuleSequences rules;
+    BOOST_CHECK(Parse("Mo-We 00:00-24:00 off", rules));
+
+    std::tm time{};
+    BOOST_CHECK(GetTimeTuple("2016-10-03 05:35", kDateTimeFmt, time));
+    BOOST_CHECK(IsActive(rules[0], time));
+
+    BOOST_CHECK(GetTimeTuple("2017-01-17 15:35", kDateTimeFmt, time));
+    BOOST_CHECK(IsActive(rules[0], time));
+
+    BOOST_CHECK(GetTimeTuple("2017-05-31 23:35", kDateTimeFmt, time));
+    BOOST_CHECK(IsActive(rules[0], time));
+
+    BOOST_CHECK(GetTimeTuple("2017-02-10 05:35", kDateTimeFmt, time));
+    BOOST_CHECK(!IsActive(rules[0], time));
+
+    BOOST_CHECK(GetTimeTuple("2017-05-21 06:01", kDateTimeFmt, time));
+    BOOST_CHECK(!IsActive(rules[0], time));
+  }
 }
 
 BOOST_AUTO_TEST_CASE(OpeningHours_TestIsOpen)
@@ -1499,9 +1545,8 @@ BOOST_AUTO_TEST_CASE(OpeningHours_TestIsOpen)
     BOOST_CHECK(Parse("06:13-15:00; 16:30+", rules));
 
     BOOST_CHECK(IsOpen(rules, "2013-12-12 7:00"));
+    BOOST_CHECK(IsOpen(rules, "2013-12-12 20:00"));
     BOOST_CHECK(IsClosed(rules, "2013-12-12 16:00"));
-    /// Open end is not supported yet, so evaluate to close
-    BOOST_CHECK(IsClosed(rules, "2013-12-12 20:00"));
   }
   {
     TRuleSequences rules;
@@ -1533,6 +1578,35 @@ BOOST_AUTO_TEST_CASE(OpeningHours_TestIsOpen)
     BOOST_CHECK(IsClosed(rules, "2015-04-12 14:15"));
     BOOST_CHECK(IsClosed(rules, "2016-04-12 20:15"));
   }
+  {
+    TRuleSequences rules;
+    BOOST_CHECK(Parse("Mo-Th 15:00+; Fr-Su 13:00+", rules));
+
+    BOOST_CHECK(!IsOpen(rules, "2016-06-06 13:14"));
+    BOOST_CHECK(IsOpen(rules, "2016-06-06 17:06"));
+    BOOST_CHECK(IsOpen(rules, "2016-06-05 13:06"));
+    BOOST_CHECK(IsOpen(rules, "2016-05-31 18:28"));
+  }
+  {
+    TRuleSequences rules;
+    BOOST_CHECK(Parse("Mo-We 00:00-24:00", rules));
+
+    BOOST_CHECK(IsOpen(rules, "2016-10-03 05:35"));
+    BOOST_CHECK(IsOpen(rules, "2017-01-17 15:35"));
+    BOOST_CHECK(IsOpen(rules, "2017-05-31 23:35"));
+    BOOST_CHECK(!IsOpen(rules, "2017-02-10 05:35"));
+    BOOST_CHECK(!IsOpen(rules, "2017-05-21 06:01"));
+  } 
+  {
+    TRuleSequences rules;
+    BOOST_CHECK(Parse("Mo-Su 00:00-24:00; Mo-We 00:00-24:00 off", rules));
+
+    BOOST_CHECK(!IsOpen(rules, "2016-10-03 05:35"));
+    BOOST_CHECK(!IsOpen(rules, "2017-01-17 15:35"));
+    BOOST_CHECK(!IsOpen(rules, "2017-05-31 23:35"));
+    BOOST_CHECK(IsOpen(rules, "2017-02-10 05:35"));
+    BOOST_CHECK(IsOpen(rules, "2017-05-21 06:01"));
+  }
 }
 
 
@@ -1562,5 +1636,19 @@ BOOST_AUTO_TEST_CASE(OpeningHours_TestOpeningHours)
   {
     OpeningHours oh("Nov +1");
     BOOST_CHECK(!oh.IsValid());
+  }
+  {
+    OpeningHours oh("Mo-Th 15:00+; Fr-Su 13:00+");
+    BOOST_CHECK(oh.IsValid());
+
+    std::tm time = {};
+    BOOST_CHECK(GetTimeTuple("2016-05-31 18:28", fmt, time));
+    BOOST_CHECK(oh.IsOpen(mktime(&time)));
+
+    BOOST_CHECK(GetTimeTuple("2016-05-31 22:28", fmt, time));
+    BOOST_CHECK(oh.IsOpen(mktime(&time)));
+
+    BOOST_CHECK(GetTimeTuple("2016-05-31 10:30", fmt, time));
+    BOOST_CHECK(oh.IsClosed(mktime(&time)));
   }
 }

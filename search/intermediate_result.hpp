@@ -1,10 +1,13 @@
 #pragma once
+
+#include "search/pre_ranking_info.hpp"
+#include "search/ranking_info.hpp"
+#include "search/ranking_utils.hpp"
 #include "search/result.hpp"
-#include "search/v2/pre_ranking_info.hpp"
-#include "search/v2/ranking_info.hpp"
-#include "search/v2/ranking_utils.hpp"
 
 #include "indexer/feature_data.hpp"
+
+#include "std/set.hpp"
 
 class FeatureType;
 class CategoriesHolder;
@@ -18,36 +21,29 @@ struct CountryInfo;
 namespace search
 {
 class ReverseGeocoder;
-namespace impl
-{
+
 /// First pass results class. Objects are creating during search in trie.
 /// Works fast without feature loading and provide ranking.
 class PreResult1
 {
+public:
+  PreResult1(FeatureID const & fID, PreRankingInfo const & info);
+
+  static bool LessRank(PreResult1 const & r1, PreResult1 const & r2);
+  static bool LessDistance(PreResult1 const & r1, PreResult1 const & r2);
+
+  inline FeatureID GetId() const { return m_id; }
+  inline double GetDistance() const { return m_info.m_distanceToPivot; }
+  inline uint8_t GetRank() const { return m_info.m_rank; }
+  inline PreRankingInfo & GetInfo() { return m_info; }
+  inline PreRankingInfo const & GetInfo() const { return m_info; }
+
+private:
   friend class PreResult2;
 
   FeatureID m_id;
-  double m_priority;
-  int8_t m_viewportID;
-
-  v2::PreRankingInfo m_info;
-
-public:
-  explicit PreResult1(double priority);
-
-  PreResult1(FeatureID const & fID, double priority, int8_t viewportID,
-             v2::PreRankingInfo const & info);
-
-  static bool LessRank(PreResult1 const & r1, PreResult1 const & r2);
-  static bool LessPriority(PreResult1 const & r1, PreResult1 const & r2);
-
-  inline FeatureID GetID() const { return m_id; }
-  inline double GetPriority() const { return m_priority; }
-  inline uint8_t GetRank() const { return m_info.m_rank; }
-  inline int8_t GetViewportID() const { return m_viewportID; }
-  inline v2::PreRankingInfo const & GetInfo() const { return m_info; }
+  PreRankingInfo m_info;
 };
-
 
 /// Second result class. Objects are creating during reading of features.
 /// Read and fill needed info for ranking and getting final results.
@@ -64,13 +60,13 @@ public:
   };
 
   /// For RESULT_FEATURE and RESULT_BUILDING.
-  PreResult2(FeatureType const & f, PreResult1 const * p, m2::PointD const & center,
-             m2::PointD const & pivot, string const & displayName, string const & fileName);
+  PreResult2(FeatureType const & f, m2::PointD const & center, m2::PointD const & pivot,
+             string const & displayName, string const & fileName);
 
   /// For RESULT_LATLON.
   PreResult2(double lat, double lon);
 
-  inline search::v2::RankingInfo const & GetRankingInfo() const { return m_info; }
+  inline search::RankingInfo const & GetRankingInfo() const { return m_info; }
 
   template <typename TInfo>
   inline void SetRankingInfo(TInfo && info)
@@ -90,10 +86,14 @@ public:
   /// Filter equal features for different mwm's.
   class StrictEqualF
   {
-    PreResult2 const & m_r;
   public:
-    StrictEqualF(PreResult2 const & r) : m_r(r) {}
-    bool operator() (PreResult2 const & r) const;
+    StrictEqualF(PreResult2 const & r, double const epsMeters);
+
+    bool operator()(PreResult2 const & r) const;
+
+  private:
+    PreResult2 const & m_r;
+    double const m_epsMeters;
   };
 
   /// To filter equal linear objects.
@@ -147,7 +147,7 @@ private:
 
   double m_distance;
   ResultType m_resultType;
-  v2::RankingInfo m_info;
+  RankingInfo m_info;
   feature::EGeomType m_geomType;
 
   Result::Metadata m_metadata;
@@ -158,8 +158,43 @@ inline string DebugPrint(PreResult2 const & t)
   return t.DebugPrint();
 }
 
-}  // namespace search::impl
-
 void ProcessMetadata(FeatureType const & ft, Result::Metadata & meta);
 
+class IndexedValue
+{
+  /// @todo Do not use shared_ptr for optimization issues.
+  /// Need to rewrite std::unique algorithm.
+  unique_ptr<PreResult2> m_value;
+
+  double m_rank;
+  double m_distanceToPivot;
+
+  friend string DebugPrint(IndexedValue const & value)
+  {
+    ostringstream os;
+    os << "IndexedValue [";
+    if (value.m_value)
+      os << DebugPrint(*value.m_value);
+    os << "]";
+    return os.str();
+  }
+
+public:
+  explicit IndexedValue(unique_ptr<PreResult2> value)
+    : m_value(move(value)), m_rank(0.0), m_distanceToPivot(numeric_limits<double>::max())
+  {
+    if (!m_value)
+      return;
+
+    auto const & info = m_value->GetRankingInfo();
+    m_rank = info.GetLinearModelRank();
+    m_distanceToPivot = info.m_distanceToPivot;
+  }
+
+  PreResult2 const & operator*() const { return *m_value; }
+
+  inline double GetRank() const { return m_rank; }
+
+  inline double GetDistanceToPivot() const { return m_distanceToPivot; }
+};
 }  // namespace search

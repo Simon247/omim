@@ -7,7 +7,8 @@
 #include "coding/file_reader.hpp"
 #include "coding/read_write_utils.hpp"
 
-#include "std/bind.hpp"
+#include <functional>
+#include <list>
 
 
 namespace serial { class CodingParams; }
@@ -16,11 +17,11 @@ namespace serial { class CodingParams; }
 class FeatureBuilder1
 {
   /// For debugging
-  friend string DebugPrint(FeatureBuilder1 const & f);
+  friend std::string DebugPrint(FeatureBuilder1 const & f);
 
 public:
   using TPointSeq = vector<m2::PointD>;
-  using TGeometry = list<TPointSeq>;
+  using TGeometry = std::list<TPointSeq>;
 
   using TBuffer = vector<char>;
 
@@ -33,11 +34,11 @@ public:
 
   void SetRank(uint8_t rank);
 
-  void SetTestId(uint64_t id);
+  void AddHouseNumber(std::string const & houseNumber);
 
-  void AddHouseNumber(string const & houseNumber);
+  void AddStreet(std::string const & streetName);
 
-  void AddStreet(string const & streetName);
+  void AddPostcode(std::string const & postcode);
 
   /// Add point to geometry.
   void AddPoint(m2::PointD const & p);
@@ -59,6 +60,7 @@ public:
 
 
   inline feature::Metadata const & GetMetadata() const { return m_params.GetMetadata(); }
+  inline feature::Metadata & GetMetadataForTesting() { return m_params.GetMetadata(); }
   inline TGeometry const & GetGeometry() const { return m_polygons; }
   inline TPointSeq const & GetOuterGeometry() const { return m_polygons.front(); }
   inline feature::EGeomType GetGeomType() const { return m_params.GetGeomType(); }
@@ -98,7 +100,7 @@ public:
   //@{
   inline m2::RectD GetLimitRect() const { return m_limitRect; }
 
-  bool FormatFullAddress(string & res) const;
+  bool FormatFullAddress(std::string & res) const;
 
   /// Get common parameters of feature.
   FeatureBase GetFeatureBase() const;
@@ -159,14 +161,18 @@ public:
 
   inline FeatureParams const & GetParams() const { return m_params; }
 
-  /// @name For OSM debugging, store original OSM id
+  /// @name For OSM debugging and osm objects replacement, store original OSM id
   //@{
   void AddOsmId(osm::Id id);
   void SetOsmId(osm::Id id);
   osm::Id GetFirstOsmId() const;
   osm::Id GetLastOsmId() const;
+  /// @returns an id of the most general element: node's one if there is no area or relation,
+  /// area's one if there is no relation, and relation id otherwise.
+  osm::Id GetMostGenericOsmId() const;
   bool HasOsmId(osm::Id const & id) const;
-  string GetOsmIdsString() const;
+  std::string GetOsmIdsString() const;
+  vector<osm::Id> const & GetOsmIds() const { return m_osmIds; }
   //@}
 
   uint64_t GetWayIDForRouting() const;
@@ -177,8 +183,8 @@ public:
   void SetCoastCell(int64_t iCell) { m_coastCell = iCell; }
   inline bool IsCoastCell() const { return (m_coastCell != -1); }
 
-  bool AddName(string const & lang, string const & name);
-  string GetName(int8_t lang = StringUtf8Multilang::kDefaultCode) const;
+  bool AddName(std::string const & lang, std::string const & name);
+  std::string GetName(int8_t lang = StringUtf8Multilang::kDefaultCode) const;
 
   uint8_t GetRank() const { return m_params.rank; }
 
@@ -221,7 +227,7 @@ class FeatureBuilder2 : public FeatureBuilder1
   static void SerializeOffsets(uint32_t mask, TOffsets const & offsets, TBuffer & buffer);
 
   /// For debugging
-  friend string DebugPrint(FeatureBuilder2 const & f);
+  friend std::string DebugPrint(FeatureBuilder2 const & f);
 
 public:
   struct SupportingData
@@ -268,7 +274,7 @@ namespace feature
 
   /// Process features in .dat file.
   template <class ToDo>
-  void ForEachFromDatRawFormat(string const & fName, ToDo && toDo)
+  void ForEachFromDatRawFormat(std::string const & fName, ToDo && toDo)
   {
     FileReader reader(fName);
     ReaderSource<FileReader> src(reader);

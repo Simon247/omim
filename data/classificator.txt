@@ -19,12 +19,15 @@ world  +
         terminal  -
         {}
     amenity  +
+        arts_centre  -
         atm  -
         bank  -
         bar  -
         bbq  -
         bench  -
+        bicycle_parking  -
         bicycle_rental  -
+        biergarten  -
         brothel  -
         bureau_de_change  -
         bus_station  -
@@ -38,13 +41,17 @@ world  +
         cinema  -
         clinic  -
         college  -
+        community_centre  -
+        courthouse  -
         dentist  -
         doctors  -
         drinking_water  -
+        driving_school  -
         embassy  -
         fast_food  -
         ferry_terminal  -
         fire_station  -
+        food_court  -
         fountain  -
         fuel  -
         grave_yard  +
@@ -52,10 +59,14 @@ world  +
             {}
         hospital  -
         hunting_stand  -
+        ice_cream  -
+        internet_cafe  -
         kindergarten  -
         library  -
         marketplace  -
+        motorcycle_parking  -
         nightclub  -
+        nursing_home  -
         parking  +
             fee  -
             multi-storey  +
@@ -71,6 +82,7 @@ world  +
                 fee  -
                 {}
             {}
+        payment_terminal  -
         pharmacy  -
         place_of_worship  +
             buddhist  -
@@ -84,11 +96,14 @@ world  +
         police  -
         post_box  -
         post_office  -
+        prison  -
         pub  -
+        public_bookcase  -
         recycling  -
         restaurant  -
         school  -
         shelter  -
+        shower  -
         speed_trap  -
         taxi  -
         telephone  -
@@ -97,11 +112,15 @@ world  +
         townhall  -
         university  -
         vending_machine  +
+            cigarettes  -
+            drinks  -
             parking_tickets  -
             public_transport_tickets  -
             {}
         veterinary  -
+        waste_basket  -
         waste_disposal  -
+        water_point  -
         {}
     area:highway  +
         cycleway  -
@@ -163,6 +182,8 @@ world  +
         {}
     building  +
         address  -
+        garage  -
+        has_parts  -
         train_station  -
         {}
     building:part  -
@@ -187,6 +208,11 @@ world  +
     earthquake:damage  +
         spontaneous_camp  -
         {}
+    emergency  +
+        defibrillator  -
+        fire_hydrant  -
+        phone  -
+        {}
     entrance  -
     highway  +
         bridleway  +
@@ -210,7 +236,6 @@ world  +
             difficult_alpine_hiking  -
             hiking  -
             mountain_hiking  -
-            no-access  -
             permissive  -
             tunnel  -
             {}
@@ -231,8 +256,6 @@ world  +
         path  +
             alpine_hiking  -
             bicycle  -
-            bicycle-bridge  -
-            bicycle-tunnel  -
             bridge  -
             demanding_alpine_hiking  -
             demanding_mountain_hiking  -
@@ -240,7 +263,6 @@ world  +
             hiking  -
             horse  -
             mountain_hiking  -
-            no-access  -
             permissive  -
             tunnel  -
             {}
@@ -265,6 +287,7 @@ world  +
             bridge  -
             tunnel  -
             {}
+        rest_area  -
         road  +
             bridge  -
             tunnel  -
@@ -288,6 +311,7 @@ world  +
             parking_aisle  -
             tunnel  -
             {}
+        services  -
         speed_camera  -
         steps  +
             bridge  -
@@ -322,6 +346,7 @@ world  +
             permissive  -
             tunnel  -
             {}
+        traffic_signals  -
         trunk  +
             bridge  -
             tunnel  -
@@ -344,6 +369,7 @@ world  +
         boundary_stone  -
         castle  -
         citywalls  -
+        fort  -
         memorial  -
         monument  -
         museum  -
@@ -354,10 +380,16 @@ world  +
         wayside_shrine  -
         {}
     hwtag  +
+        bidir_bicycle  -
         lit  -
+        nobicycle  -
+        nocar  -
         nofoot  -
         oneway  -
         private  -
+        toll  -
+        yesbicycle  -
+        yescar  -
         yesfoot  -
         {}
     internet_access  +
@@ -411,9 +443,13 @@ world  +
         dog_park  +
             tennis  -
             {}
+        fitness_centre  -
+        fitness_station  -
         garden  -
         golf_course  -
+        ice_rink  -
         landscape_reserve  -
+        marina  -
         nature_reserve  -
         park  +
             no-access  -
@@ -430,8 +466,14 @@ world  +
             tennis  -
             {}
         recreation_ground  -
+        sauna  -
         slipway  -
-        sports_centre  -
+        sports_centre  +
+            climbing  -
+            shooting  -
+            swimming  -
+            yoga  -
+            {}
         stadium  -
         swimming_pool  -
         track  -
@@ -440,16 +482,21 @@ world  +
     man_made  +
         breakwater  -
         cairn  -
+        chimney  -
         cutline  -
         lighthouse  -
         pier  -
         pipeline  +
             overground  -
             {}
-        survey_point  -
+        surveillance  -
+        tower  -
         wastewater_plant  -
+        water_tap  -
         water_tower  -
+        water_well  -
         windmill  -
+        works  -
         {}
     mapswithme  +
         grid  -
@@ -491,7 +538,6 @@ world  +
         vineyard  -
         volcano  -
         water  -
-        waterfall  -
         wetland  +
             bog  -
             marsh  -
@@ -509,8 +555,26 @@ world  +
         company  -
         estate_agent  -
         government  -
+        insurance  -
         lawyer  -
+        ngo  -
         telecommunication  -
+        {}
+    olympics  +
+        attraction  -
+        bike_sport  -
+        live_site  -
+        official_building  -
+        stadium  -
+        stadium_main  -
+        transport_airport  -
+        transport_boat  -
+        transport_bus  -
+        transport_cable  -
+        transport_railway  -
+        transport_subway  -
+        transport_tram  -
+        water_sport  -
         {}
     piste:lift  +
         j-bar  -
@@ -578,8 +642,14 @@ world  +
         minor_line  -
         pole  -
         station  -
-        sub_station  -
+        substation  -
         tower  -
+        {}
+    psurface  +
+        paved_bad  -
+        paved_good  -
+        unpaved_bad  -
+        unpaved_good  -
         {}
     public_transport  +
         platform  -
@@ -717,21 +787,31 @@ world  +
         beauty  -
         beverages  -
         bicycle  -
+        bookmaker  -
         books  -
         butcher  -
         car  -
-        car_repair  -
+        car_parts  -
+        car_repair  +
+            tyres  -
+            {}
         chemist  -
+        chocolate  -
         clothes  -
+        coffee  -
         computer  -
         confectionery  -
         convenience  -
         copyshop  -
+        cosmetics  -
         department_store  -
         doityourself  -
         dry_cleaning  -
         electronics  -
+        erotic  -
+        fabric  -
         florist  -
+        funeral_directors  -
         furniture  -
         garden_centre  -
         gift  -
@@ -742,16 +822,49 @@ world  +
         kiosk  -
         laundry  -
         mall  -
+        massage  -
         mobile_phone  -
+        motorcycle  -
+        music  -
+        musical_instrument  -
+        newsagent  -
         optician  -
         outdoor  -
+        pawnbroker  -
+        pet  -
         photo  -
+        seafood  -
         shoes  -
         sports  -
+        stationery  -
         supermarket  -
+        tattoo  -
+        tea  -
+        ticket  -
         toys  -
         travel_agency  -
         tyres  -
+        variety_store  -
+        video  -
+        wine  -
+        {}
+    sponsored  +
+        banner  +
+            deliveryclub  -
+            geerbest_de  -
+            geerbest_fr  -
+            geerbest_uk  -
+            lamoda_ru  -
+            lamoda_ua  -
+            raileurope  -
+            rentalcars  -
+            tutu  -
+            viator  -
+            {}
+        booking  -
+        opentable  -
+        tinkoff  -
+        viator  -
         {}
     sport  +
         american_football  -
@@ -779,22 +892,34 @@ world  +
         {}
     tourism  +
         alpine_hut  -
+        apartment  -
         artwork  -
         attraction  -
         camp_site  -
         caravan_site  -
+        chalet  -
+        gallery  -
         guest_house  -
         hostel  -
         hotel  -
         information  +
+            board  -
             guidepost  -
+            map  -
             office  -
             {}
         motel  -
         museum  -
         picnic_site  -
+        resort  -
+        theme_park  -
         viewpoint  -
+        wilderness_hut  -
         zoo  -
+        {}
+    traffic_calming  +
+        bump  -
+        hump  -
         {}
     waterway  +
         canal  +
@@ -821,5 +946,10 @@ world  +
             {}
         waterfall  -
         weir  -
+        {}
+    wheelchair  +
+        limited  -
+        no  -
+        yes  -
         {}
     {}

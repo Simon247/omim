@@ -60,7 +60,9 @@ EditorDialog::EditorDialog(QWidget * parent, osm::EditableMapObject & emo)
     int namesRow = 0;
     namesGrid->addWidget(defaultName, namesRow++, 0, 1, 0);
 
-    for (osm::LocalizedName const & ln : emo.GetLocalizedNames())
+    auto const namesDataSource = emo.GetNamesDataSource();
+
+    for (auto const & ln : namesDataSource.names)
     {
       if (ln.m_code == StringUtf8Multilang::kDefaultCode)
       {
@@ -81,15 +83,20 @@ EditorDialog::EditorDialog(QWidget * parent, osm::EditableMapObject & emo)
 
   if (emo.IsAddressEditable())
   {  // Address rows.
-    vector<string> nearbyStreets = emo.GetNearbyStreets();
-    // If feature does not have a specified street, display empty combo box.
-    if (emo.GetStreet().empty())
-      nearbyStreets.insert(nearbyStreets.begin(), "");
+    auto nearbyStreets = emo.GetNearbyStreets();
     grid->addWidget(new QLabel(kStreetObjectName), row, 0);
     QComboBox * cmb = new QComboBox();
-    for (int i = 0; i < nearbyStreets.size(); ++i)
+    cmb->setEditable(true);
+
+    if (emo.GetStreet().m_defaultName.empty())
+      cmb->addItem("");
+
+    for (size_t i = 0; i < nearbyStreets.size(); ++i)
     {
-      cmb->addItem(nearbyStreets[i].c_str());
+      string street = nearbyStreets[i].m_defaultName;
+      if (!nearbyStreets[i].m_localizedName.empty())
+        street += " / " + nearbyStreets[i].m_localizedName;
+      cmb->addItem(street.c_str());
       if (emo.GetStreet() == nearbyStreets[i])
         cmb->setCurrentIndex(i);
     }
@@ -195,7 +202,13 @@ void EditorDialog::OnSave()
   if (m_feature.IsAddressEditable())
   {
     m_feature.SetHouseNumber(findChild<QLineEdit *>(kHouseNumberObjectName)->text().toStdString());
-    m_feature.SetStreet(findChild<QComboBox *>(kStreetObjectName)->currentText().toStdString());
+    QString const editedStreet = findChild<QComboBox *>(kStreetObjectName)->currentText();
+    QStringList const names = editedStreet.split(" / ", QString::SkipEmptyParts);
+    QString const localized = names.size() > 1 ? names.at(1) : QString();
+    if (!names.empty())
+      m_feature.SetStreet({names.at(0).toStdString(), localized.toStdString()});
+    else
+      m_feature.SetStreet({});
     m_feature.SetPostcode(findChild<QLineEdit *>(kPostcodeObjectName)->text().toStdString());
   }
 

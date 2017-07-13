@@ -1,26 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout
   xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools"
   android:layout_width="match_parent"
   android:layout_height="wrap_content">
 
-  <com.mapswithme.maps.widget.ObservableScrollView
-    android:id="@+id/pp__details"
+  <LinearLayout
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="?ppBackground"
-    android:overScrollMode="never">
+    android:layout_height="wrap_content"
+    android:background="?windowBackgroundForced"
+    android:orientation="vertical">
+
+    <include
+      layout="@layout/divider_horizontal"
+      android:layout_width="match_parent"
+      android:layout_height="1dp"
+      android:layout_marginBottom="@dimen/margin_half"/>
+
+    <include layout="@layout/place_page_viator"/>
+
+    <include
+      layout="@layout/divider_horizontal"/>
 
     <LinearLayout
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
+      android:background="?ppBackground"
       android:orientation="vertical">
 
-      <View
+      <include
+        layout="@layout/place_page_bookmark_details"
         android:layout_width="match_parent"
-        android:layout_height="1dp"
+        android:layout_height="wrap_content"
         android:layout_marginBottom="@dimen/margin_half"
-        android:background="?dividerHorizontal"/>
+        tools:visibility="gone"/>
+
+      <include layout="@layout/place_page_hotel_gallery"/>
+
+      <include layout="@layout/place_page_hotel_description"/>
+
+      <include layout="@layout/place_page_hotel_facilities"/>
+
+      <include layout="@layout/place_page_hotel_nearby"/>
+
+      <include layout="@layout/place_page_hotel_rating"/>
+      
+      <include layout="@layout/place_page_ugc"/>
 
       <include layout="@layout/place_page_placename"/>
 
@@ -36,37 +61,55 @@
 
       <include layout="@layout/place_page_email"/>
 
-      <include layout="@layout/place_page_latlon"/>
-
       <include layout="@layout/place_page_wifi"/>
 
       <include layout="@layout/place_page_operator"/>
 
       <include layout="@layout/place_page_cuisine"/>
 
-      <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:layout_marginBottom="@dimen/margin_half"
-        android:layout_marginTop="@dimen/margin_half"
-        android:background="?dividerHorizontal"/>
+      <include layout="@layout/place_page_latlon"/>
 
-      <include layout="@layout/place_page_editor"/>
+      <include layout="@layout/divider_horizontal"/>
 
-      <include layout="@layout/place_page_report_problem"/>
+      <include layout="@layout/place_page_more"/>
 
-      <Space
-        android:layout_width="match_parent"
-        android:layout_height="@dimen/margin_half"/>
-
-      <include
-        layout="@layout/place_page_bookmark_details"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"/>
-
+      <include layout="@layout/place_page_local_ad"/>
     </LinearLayout>
 
-  </com.mapswithme.maps.widget.ObservableScrollView>
+    <include
+      android:id="@+id/place_page_taxi_divider"
+      layout="@layout/divider_horizontal"
+      android:layout_width="match_parent"
+      android:layout_height="1dp"
+      android:layout_marginTop="@dimen/margin_half"/>
+
+    <include layout="@layout/place_page_taxi"/>
+
+    <FrameLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content">
+      <android.support.v4.widget.Space
+        android:id="@+id/edit_top_space"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/margin_base"/>
+      <ImageView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:src="@drawable/shadow_card"
+        android:scaleType="fitXY"/>
+    </FrameLayout>
+
+    <include layout="@layout/place_page_editor"/>
+
+    <include layout="@layout/place_page_add_business"/>
+
+    <include layout="@layout/place_page_add"/>
+
+    <android.support.v4.widget.Space
+      android:layout_width="match_parent"
+      android:layout_height="@dimen/margin_base"/>
+
+  </LinearLayout>
 
   <include layout="@layout/shadow_top"/>
 

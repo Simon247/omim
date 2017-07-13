@@ -1,113 +1,63 @@
 #pragma once
 
 #include "base/assert.hpp"
-#include "base/macros.hpp"
+#include "base/thread.hpp"
 #include "base/thread_checker.hpp"
 
-#include "std/condition_variable.hpp"
-#include "std/mutex.hpp"
-#include "std/queue.hpp"
-#include "std/shared_ptr.hpp"
-#include "std/thread.hpp"
+#include <condition_variable>
+#include <mutex>
+#include <queue>
+#include <utility>
 
-
-namespace my
+namespace base
 {
-/// This class wraps a sequential worker thread, that performs tasks
-/// one-by-one. This class is not thread-safe, so, it should be
-/// instantiated, used and destroyed on the same thread.
-template <typename Task>
+// This class represents a simple worker thread with a queue of tasks.
+//
+// *NOTE* This class IS thread-safe, but it must be destroyed on the
+// same thread it was created.
 class WorkerThread
 {
 public:
-  WorkerThread(int maxTasks)
-      : m_maxTasks(maxTasks), m_shouldFinish(false), m_workerThread(&WorkerThread::Worker, this)
+  enum class Exit
   {
+    ExecPending,
+    SkipPending
+  };
+
+  using Task = std::function<void()>;
+
+  WorkerThread();
+  ~WorkerThread();
+
+  // Pushes task to the end of the thread's queue. Returns false when
+  // the thread is shut down.
+  template <typename T>
+  bool Push(T && t)
+  {
+    std::lock_guard<std::mutex> lk(m_mu);
+    if (m_shutdown)
+      return false;
+    m_queue.emplace(std::forward<T>(t));
+    m_cv.notify_one();
+    return true;
   }
 
-  ~WorkerThread()
-  {
-    ASSERT(m_threadChecker.CalledOnOriginalThread(), ());
-    if (IsRunning())
-      RunUntilIdleAndStop();
-    ASSERT(!IsRunning(), ());
-  }
-
-  /// Pushes new task into worker thread's queue. If the queue is
-  /// full, current thread is blocked.
-  ///
-  /// \param task A callable object that will be called by worker thread.
-  void Push(shared_ptr<Task> task)
-  {
-    ASSERT(m_threadChecker.CalledOnOriginalThread(), ());
-    ASSERT(IsRunning(), ());
-    unique_lock<mutex> lock(m_mutex);
-    m_condNotFull.wait(lock, [this]()
-                       {
-                         return m_tasks.size() < m_maxTasks;
-                       });
-    m_tasks.push(task);
-    m_condNonEmpty.notify_one();
-  }
-
-  /// Runs worker thread until it'll become idle. After that,
-  /// terminates worker thread.
-  void RunUntilIdleAndStop()
-  {
-    ASSERT(m_threadChecker.CalledOnOriginalThread(), ());
-    ASSERT(IsRunning(), ());
-    {
-      lock_guard<mutex> lock(m_mutex);
-      m_shouldFinish = true;
-      m_condNonEmpty.notify_one();
-    }
-    m_workerThread.join();
-  }
-
-  /// \return True if worker thread is running, false otherwise.
-  inline bool IsRunning() const
-  {
-    ASSERT(m_threadChecker.CalledOnOriginalThread(), ());
-    return m_workerThread.joinable();
-  }
+  // Sends a signal to the thread to shut down. Returns false when the
+  // thread was shut down previously.
+  bool Shutdown(Exit e);
 
 private:
-  void Worker()
-  {
-    shared_ptr<Task> task;
-    while (true)
-    {
-      {
-        unique_lock<mutex> lock(m_mutex);
-        m_condNonEmpty.wait(lock, [this]()
-                            {
-                              return m_shouldFinish || !m_tasks.empty();
-                            });
-        if (m_shouldFinish && m_tasks.empty())
-          break;
-        task = m_tasks.front();
-        m_tasks.pop();
-        m_condNotFull.notify_one();
-      }
-      (*task)();
-    }
-  }
+  void ProcessTasks();
 
-  /// Maximum number of tasks in the queue.
-  int const m_maxTasks;
-  queue<shared_ptr<Task>> m_tasks;
+  threads::SimpleThread m_thread;
+  std::mutex m_mu;
+  std::condition_variable m_cv;
 
-  /// When true, worker thread should finish all tasks in the queue
-  /// and terminate.
-  bool m_shouldFinish;
+  bool m_shutdown = false;
+  Exit m_exit = Exit::SkipPending;
 
-  mutex m_mutex;
-  condition_variable m_condNotFull;
-  condition_variable m_condNonEmpty;
-  thread m_workerThread;
-#ifdef DEBUG
-  ThreadChecker m_threadChecker;
-#endif
-  DISALLOW_COPY_AND_MOVE(WorkerThread);
-};  // class WorkerThread
-}  // namespace my
+  std::queue<Task> m_queue;
+
+  ThreadChecker m_checker;
+};
+}  // namespace base

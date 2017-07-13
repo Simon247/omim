@@ -1,13 +1,17 @@
 package com.mapswithme.maps;
 
 import android.app.Application;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
-import android.preference.PreferenceManager;
+import android.support.annotation.NonNull;
 import android.support.annotation.UiThread;
+import android.support.multidex.MultiDex;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -22,36 +26,40 @@ import com.mapswithme.maps.bookmarks.data.BookmarkManager;
 import com.mapswithme.maps.downloader.CountryItem;
 import com.mapswithme.maps.downloader.MapManager;
 import com.mapswithme.maps.editor.Editor;
+import com.mapswithme.maps.location.LocationHelper;
 import com.mapswithme.maps.location.TrackRecorder;
+import com.mapswithme.maps.routing.RoutingController;
+import com.mapswithme.maps.settings.StoragePathManager;
 import com.mapswithme.maps.sound.TtsPlayer;
+import com.mapswithme.maps.traffic.TrafficManager;
 import com.mapswithme.util.Config;
 import com.mapswithme.util.Constants;
+import com.mapswithme.util.Counters;
 import com.mapswithme.util.ThemeSwitcher;
 import com.mapswithme.util.UiUtils;
-import com.mapswithme.util.Yota;
-import com.mapswithme.util.statistics.AlohaHelper;
+import com.mapswithme.util.Utils;
+import com.mapswithme.util.log.Logger;
+import com.mapswithme.util.log.LoggerFactory;
+import com.mapswithme.util.statistics.PushwooshHelper;
 import com.mapswithme.util.statistics.Statistics;
-import com.parse.Parse;
-import com.parse.ParseException;
-import com.parse.ParseInstallation;
-import com.parse.SaveCallback;
+import com.my.tracker.MyTracker;
+import com.my.tracker.MyTrackerParams;
+import com.pushwoosh.PushManager;
 import io.fabric.sdk.android.Fabric;
-import net.hockeyapp.android.CrashManager;
 
 public class MwmApplication extends Application
 {
+  private Logger mLogger;
   private final static String TAG = "MwmApplication";
 
-  // Parse
-  private static final String PREF_PARSE_DEVICE_TOKEN = "ParseDeviceToken";
-  private static final String PREF_PARSE_INSTALLATION_ID = "ParseInstallationId";
+  private static final String PW_EMPTY_APP_ID = "XXXXX";
 
   private static MwmApplication sSelf;
   private SharedPreferences mPrefs;
   private AppBackgroundTracker mBackgroundTracker;
 
-  private boolean mAreCountersInitialized;
   private boolean mIsFrameworkInitialized;
+  private boolean mIsPlatformInitialized;
 
   private Handler mMainLoopHandler;
   private final Object mMainQueueToken = new Object();
@@ -64,11 +72,13 @@ public class MwmApplication extends Application
       for (MapManager.StorageCallbackData item : data)
         if (item.isLeafNode && item.newStatus == CountryItem.STATUS_FAILED)
         {
-          Notifier.cancelDownloadSuggest();
+          if (MapManager.nativeIsAutoretryFailed())
+          {
+            Notifier.cancelDownloadSuggest();
 
-          CountryItem country = CountryItem.fill(item.countryId);
-          Notifier.notifyDownloadFailed(country);
-          MapManager.sendErrorStat(Statistics.EventName.DOWNLOADER_ERROR, country.errorCode);
+            Notifier.notifyDownloadFailed(item.countryId, MapManager.nativeGetName(item.countryId));
+            MapManager.sendErrorStat(Statistics.EventName.DOWNLOADER_ERROR, MapManager.nativeGetError(item.countryId));
+          }
 
           return;
         }
@@ -77,6 +87,32 @@ public class MwmApplication extends Application
     @Override
     public void onProgress(String countryId, long localSize, long remoteSize) {}
   };
+
+  @NonNull
+  private final AppBackgroundTracker.OnTransitionListener mBackgroundListener =
+      new AppBackgroundTracker.OnTransitionListener()
+      {
+        @Override
+        public void onTransit(boolean foreground)
+        {
+          if (!foreground && LoggerFactory.INSTANCE.isFileLoggingEnabled())
+          {
+            Log.i(TAG, "The app goes to background. All logs are going to be zipped.");
+            LoggerFactory.INSTANCE.zipLogs(null);
+          }
+        }
+      };
+
+  @NonNull
+  private final AppBackgroundTracker.OnVisibleAppLaunchListener mVisibleAppLaunchListener =
+      new AppBackgroundTracker.OnVisibleAppLaunchListener()
+      {
+        @Override
+        public void onVisibleAppLaunch()
+        {
+          Statistics.INSTANCE.trackColdStartupInfo();
+        }
+      };
 
   public MwmApplication()
   {
@@ -94,29 +130,74 @@ public class MwmApplication extends Application
     return sSelf.mBackgroundTracker;
   }
 
-  public static SharedPreferences prefs()
+  public synchronized static SharedPreferences prefs()
   {
+    if (sSelf.mPrefs == null)
+      sSelf.mPrefs = sSelf.getSharedPreferences(sSelf.getString(R.string.pref_file_name), MODE_PRIVATE);
+
     return sSelf.mPrefs;
   }
 
+  public static boolean isCrashlyticsEnabled()
+  {
+    return !BuildConfig.FABRIC_API_KEY.startsWith("0000");
+  }
+
+  @Override
+  protected void attachBaseContext(Context base)
+  {
+    super.attachBaseContext(base);
+    MultiDex.install(this);
+  }
+
+  @SuppressWarnings("ResultOfMethodCallIgnored")
   @Override
   public void onCreate()
   {
     super.onCreate();
+    mLogger = LoggerFactory.INSTANCE.getLogger(LoggerFactory.Type.MISC);
+    mLogger.d(TAG, "Application is created");
     mMainLoopHandler = new Handler(getMainLooper());
 
-    initHockeyApp();
     initCrashlytics();
 
-    initPaths();
-    nativeInitPlatform(getApkPath(), getDataStoragePath(), getTempPath(), getObbGooglePath(),
-                       BuildConfig.FLAVOR, BuildConfig.BUILD_TYPE,
-                       Yota.isFirstYota(), UiUtils.isTablet());
-    initParse();
+    initPushWoosh();
+
     mPrefs = getSharedPreferences(getString(R.string.pref_file_name), MODE_PRIVATE);
     mBackgroundTracker = new AppBackgroundTracker();
+    mBackgroundTracker.addListener(mVisibleAppLaunchListener);
+  }
+
+  public void initNativePlatform()
+  {
+    if (mIsPlatformInitialized)
+      return;
+
+    final boolean isInstallationIdFound = setInstallationIdToCrashlytics();
+
+    initTracker();
+
+    String settingsPath = getSettingsPath();
+    mLogger.d(TAG, "onCreate(), setting path = " + settingsPath);
+    String tempPath = getTempPath();
+    mLogger.d(TAG, "onCreate(), temp path = " + tempPath);
+    new File(settingsPath).mkdirs();
+    new File(tempPath).mkdirs();
+
+    // First we need initialize paths and platform to have access to settings and other components.
+    nativePreparePlatform(settingsPath);
+    nativeInitPlatform(getApkPath(), getStoragePath(settingsPath), getTempPath(), getObbGooglePath(),
+                       BuildConfig.FLAVOR, BuildConfig.BUILD_TYPE, UiUtils.isTablet());
+
+    Statistics s = Statistics.INSTANCE;
+
+    if (!isInstallationIdFound)
+      setInstallationIdToCrashlytics();
+
+    mBackgroundTracker.addListener(mBackgroundListener);
     TrackRecorder.init();
     Editor.init();
+    mIsPlatformInitialized = true;
   }
 
   public void initNativeCore()
@@ -131,15 +212,11 @@ public class MwmApplication extends Application
     initNativeStrings();
     BookmarkManager.nativeLoadBookmarks();
     TtsPlayer.INSTANCE.init(this);
-    ThemeSwitcher.restart();
+    ThemeSwitcher.restart(false);
+    LocationHelper.INSTANCE.initialize();
+    RoutingController.get().initialize();
+    TrafficManager.INSTANCE.initialize();
     mIsFrameworkInitialized = true;
-  }
-
-  @SuppressWarnings("ResultOfMethodCallIgnored")
-  private void initPaths()
-  {
-    new File(getDataStoragePath()).mkdirs();
-    new File(getTempPath()).mkdirs();
   }
 
   private void initNativeStrings()
@@ -151,7 +228,7 @@ public class MwmApplication extends Application
     nativeAddLocalization("country_status_download_failed", getString(R.string.country_status_download_failed));
     nativeAddLocalization("try_again", getString(R.string.try_again));
     nativeAddLocalization("not_enough_free_space_on_sdcard", getString(R.string.not_enough_free_space_on_sdcard));
-    nativeAddLocalization("dropped_pin", getString(R.string.dropped_pin));
+    nativeAddLocalization("placepage_unknown_place", getString(R.string.placepage_unknown_place));
     nativeAddLocalization("my_places", getString(R.string.my_places));
     nativeAddLocalization("my_position", getString(R.string.my_position));
     nativeAddLocalization("routes", getString(R.string.routes));
@@ -165,28 +242,41 @@ public class MwmApplication extends Application
     nativeAddLocalization("routing_failed_cross_mwm_building", getString(R.string.routing_failed_cross_mwm_building));
     nativeAddLocalization("routing_failed_route_not_found", getString(R.string.routing_failed_route_not_found));
     nativeAddLocalization("routing_failed_internal_error", getString(R.string.routing_failed_internal_error));
-  }
-
-  private void initHockeyApp()
-  {
-    String id = ("beta".equals(BuildConfig.BUILD_TYPE) ? PrivateVariables.hockeyAppBetaId()
-                                                       : PrivateVariables.hockeyAppId());
-    if (!TextUtils.isEmpty(id))
-      CrashManager.register(this, id);
+    nativeAddLocalization("place_page_booking_rating", getString(R.string.place_page_booking_rating));
   }
 
   private void initCrashlytics()
   {
-    if (BuildConfig.FABRIC_API_KEY.startsWith("0000"))
+    if (!isCrashlyticsEnabled())
       return;
 
     Fabric.with(this, new Crashlytics(), new CrashlyticsNdk());
+
     nativeInitCrashlytics();
+  }
+
+  private static boolean setInstallationIdToCrashlytics()
+  {
+    if (!isCrashlyticsEnabled())
+      return false;
+
+    final String installationId = Utils.getInstallationId();
+    // If installation id is not found this means id was not
+    // generated by alohalytics yet and it is a first run.
+    if (TextUtils.isEmpty(installationId))
+      return false;
+
+    Crashlytics.setString("AlohalyticsInstallationId", installationId);
+    return true;
   }
 
   public boolean isFrameworkInitialized()
   {
     return mIsFrameworkInitialized;
+  }
+  public boolean isPlatformInitialized()
+  {
+    return mIsPlatformInitialized;
   }
 
   public String getApkPath()
@@ -196,14 +286,31 @@ public class MwmApplication extends Application
       return getPackageManager().getApplicationInfo(BuildConfig.APPLICATION_ID, 0).sourceDir;
     } catch (final NameNotFoundException e)
     {
-      Log.e(TAG, "Can't get apk path from PackageManager");
+      mLogger.e(TAG, "Can't get apk path from PackageManager", e);
       return "";
     }
   }
 
-  public static String getDataStoragePath()
+  public static String getSettingsPath()
   {
     return Environment.getExternalStorageDirectory().getAbsolutePath() + Constants.MWM_DIR_POSTFIX;
+  }
+
+  private static String getStoragePath(String settingsPath)
+  {
+    String path = Config.getStoragePath();
+    if (!TextUtils.isEmpty(path))
+    {
+      File f = new File(path);
+      if (f.exists() && f.isDirectory())
+        return path;
+
+      path = new StoragePathManager().findMapsMeStorage(settingsPath);
+      Config.setStoragePath(path);
+      return path;
+    }
+
+    return settingsPath;
   }
 
   public String getTempPath()
@@ -213,7 +320,7 @@ public class MwmApplication extends Application
       return cacheDir.getAbsolutePath();
 
     return Environment.getExternalStorageDirectory().getAbsolutePath() +
-            String.format(Constants.STORAGE_PATH, BuildConfig.APPLICATION_ID, Constants.CACHE_DIR);
+           String.format(Constants.STORAGE_PATH, BuildConfig.APPLICATION_ID, Constants.CACHE_DIR);
   }
 
   private static String getObbGooglePath()
@@ -227,53 +334,55 @@ public class MwmApplication extends Application
     System.loadLibrary("mapswithme");
   }
 
-  /*
-   * init Parse SDK
-   */
-  private void initParse()
+  private void initPushWoosh()
   {
-    // Do not initialize Parse in default open-source version.
-    final String appId = PrivateVariables.parseApplicationId();
-    if (appId.isEmpty())
-      return;
-
-    Parse.initialize(this, appId, PrivateVariables.parseClientKey());
-    ParseInstallation.getCurrentInstallation().saveInBackground(new SaveCallback()
+    try
     {
-      @Override
-      public void done(ParseException e)
-      {
-        SharedPreferences prefs = prefs();
-        String previousId = prefs.getString(PREF_PARSE_INSTALLATION_ID, "");
-        String previousToken = prefs.getString(PREF_PARSE_DEVICE_TOKEN, "");
+      if (BuildConfig.PW_APPID.equals(PW_EMPTY_APP_ID))
+        return;
 
-        String newId = ParseInstallation.getCurrentInstallation().getInstallationId();
-        String newToken = ParseInstallation.getCurrentInstallation().getString("deviceToken");
-        if (!previousId.equals(newId) || !previousToken.equals(newToken))
-        {
-          org.alohalytics.Statistics.logEvent(AlohaHelper.PARSE_INSTALLATION_ID, newId);
-          org.alohalytics.Statistics.logEvent(AlohaHelper.PARSE_DEVICE_TOKEN, newToken);
-          prefs.edit()
-                  .putString(PREF_PARSE_INSTALLATION_ID, newId)
-                  .putString(PREF_PARSE_DEVICE_TOKEN, newToken).apply();
-        }
-      }
-    });
+      PushManager pushManager = PushManager.getInstance(this);
+
+      pushManager.onStartup(this);
+      pushManager.registerForPushNotifications();
+
+      PushwooshHelper.get().setContext(this);
+      PushwooshHelper.get().synchronize();
+    }
+    catch(Exception e)
+    {
+      mLogger.e("Pushwoosh", "Failed to init Pushwoosh", e);
+    }
   }
 
-  public void initCounters()
+  @SuppressWarnings("unused")
+  void sendPushWooshTags(String tag, String[] values)
   {
-    if (!mAreCountersInitialized)
+    try
     {
-      mAreCountersInitialized = true;
-      Config.updateLaunchCounter();
-      PreferenceManager.setDefaultValues(this, R.xml.prefs_misc, false);
+      if (values.length == 1)
+        PushwooshHelper.get().sendTag(tag, values[0]);
+      else
+        PushwooshHelper.get().sendTag(tag, values);
     }
+    catch(Exception e)
+    {
+      mLogger.e("Pushwoosh", "Failed to send pushwoosh tags", e);
+    }
+  }
+
+  private void initTracker()
+  {
+    MyTracker.setDebugMode(BuildConfig.DEBUG);
+    MyTracker.createTracker(PrivateVariables.myTrackerKey(), this);
+    final MyTrackerParams myParams = MyTracker.getTrackerParams();
+    myParams.setDefaultVendorAppPackage();
+    MyTracker.initTracker();
   }
 
   public static void onUpgrade()
   {
-    Config.resetAppSessionCounters();
+    Counters.resetAppSessionCounters();
   }
 
   @SuppressWarnings("unused")
@@ -291,22 +400,13 @@ public class MwmApplication extends Application
     mMainLoopHandler.sendMessage(m);
   }
 
-  void clearFunctorsOnUiThread()
-  {
-    mMainLoopHandler.removeCallbacksAndMessages(mMainQueueToken);
-  }
-
-  /**
-   * Initializes native Platform with paths. Should be called before usage of any other native components.
-   */
+  private static native void nativePreparePlatform(String settingsPath);
   private native void nativeInitPlatform(String apkPath, String storagePath, String tmpPath, String obbGooglePath,
-                                         String flavorName, String buildType, boolean isYota, boolean isTablet);
+                                         String flavorName, String buildType, boolean isTablet);
 
   private static native void nativeInitFramework();
-
-  private static native void nativeAddLocalization(String name, String value);
-
   private static native void nativeProcessFunctor(long functorPointer);
+  private static native void nativeAddLocalization(String name, String value);
 
   @UiThread
   private static native void nativeInitCrashlytics();

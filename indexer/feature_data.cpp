@@ -1,10 +1,13 @@
 #include "indexer/feature_data.hpp"
-#include "indexer/feature_impl.hpp"
+
 #include "indexer/classificator.hpp"
 #include "indexer/feature.hpp"
+#include "indexer/feature_impl.hpp"
+#include "indexer/ftypes_matcher.hpp"
 
 #include "base/assert.hpp"
 #include "base/stl_add.hpp"
+#include "base/string_utils.hpp"
 
 #include "std/algorithm.hpp"
 #include "std/bind.hpp"
@@ -35,7 +38,7 @@ TypesHolder::TypesHolder(FeatureBase const & f)
 {
   f.ForEachType([this](uint32_t type)
   {
-    this->operator()(type);
+    Add(type);
   });
 }
 
@@ -83,7 +86,10 @@ public:
       { "building" },
       { "building:part" },
       { "hwtag" },
+      { "psurface" },
       { "internet_access" },
+      { "wheelchair" },
+      { "sponsored" },
     };
 
     AddTypes(arr1);
@@ -92,7 +98,10 @@ public:
     // 2-arity
     char const * arr2[][2] = {
       { "amenity", "atm" },
+      { "amenity", "bench" },
+      { "amenity", "shelter" },
       { "building", "address" },
+      { "building", "has_parts" },
     };
 
     AddTypes(arr2);
@@ -120,7 +129,7 @@ public:
 
 namespace feature
 {
-uint8_t CalculateHeader(uint32_t const typesCount, uint8_t const headerGeomType,
+uint8_t CalculateHeader(size_t const typesCount, uint8_t const headerGeomType,
                         FeatureParamsBase const & params)
 {
   ASSERT(typesCount != 0, ("Feature should have at least one type."));
@@ -232,6 +241,11 @@ bool IsDummyName(string const & s)
 // FeatureParams implementation
 /////////////////////////////////////////////////////////////////////////////////////////
 
+void FeatureParams::ClearName()
+{
+  name.Clear();
+}
+
 bool FeatureParams::AddName(string const & lang, string const & s)
 {
   if (IsDummyName(s))
@@ -251,6 +265,21 @@ bool FeatureParams::AddHouseName(string const & s)
   if (house.IsEmpty() && AddHouseNumber(s))
     return true;
 
+  // If we got a clear number, replace the house number with it.
+  // Example: housename=16th Street, housenumber=34
+  if (strings::is_number(s))
+  {
+    string housename(house.Get());
+    if (AddHouseNumber(s))
+    {
+      // Duplicating code to avoid changing the method header.
+      string dummy;
+      if (!name.GetString(StringUtf8Multilang::kDefaultCode, dummy))
+        name.AddString(StringUtf8Multilang::kDefaultCode, housename);
+      return true;
+    }
+  }
+
   // Add as a default name if we don't have it yet.
   string dummy;
   if (!name.GetString(StringUtf8Multilang::kDefaultCode, dummy))
@@ -262,20 +291,31 @@ bool FeatureParams::AddHouseName(string const & s)
   return false;
 }
 
-bool FeatureParams::AddHouseNumber(string const & ss)
+bool FeatureParams::AddHouseNumber(string houseNumber)
 {
-  if (!feature::IsHouseNumber(ss))
+  ASSERT(!houseNumber.empty(), ("This check should be done by the caller."));
+  ASSERT_NOT_EQUAL(houseNumber.front(), ' ', ("Trim should be done by the caller."));
+
+  // Negative house numbers are not supported.
+  if (houseNumber.front() == '-' || houseNumber.find(u8"－") == 0)
     return false;
 
-  // Remove trailing zero's from house numbers.
-  // It's important for debug checks of serialized-deserialized feature.
-  string s(ss);
-  uint64_t n;
-  if (strings::to_uint64(s, n))
-    s = strings::to_string(n);
+  // Replace full-width digits, mostly in Japan, by ascii-ones.
+  strings::NormalizeDigits(houseNumber);
 
-  house.Set(s);
-  return true;
+  // Remove leading zeroes from house numbers.
+  // It's important for debug checks of serialized-deserialized feature.
+  size_t i = 0;
+  while (i < houseNumber.size() && houseNumber[i] == '0')
+    ++i;
+  houseNumber.erase(0, i);
+
+  if (any_of(houseNumber.cbegin(), houseNumber.cend(), IsDigit))
+  {
+    house.Set(houseNumber);
+    return true;
+  }
+  return false;
 }
 
 void FeatureParams::AddStreet(string s)
@@ -458,6 +498,13 @@ bool FeatureParams::FinishAddingTypes()
 
   if (m_Types.size() > kMaxTypesCount)
     m_Types.resize(kMaxTypesCount);
+
+  // Patch fix that removes house number from localities.
+  if (!house.IsEmpty() && ftypes::IsLocalityChecker::Instance()(m_Types))
+  {
+    LOG(LWARNING, ("Locality with house number", *this));
+    house.Clear();
+  }
 
   return !m_Types.empty();
 }

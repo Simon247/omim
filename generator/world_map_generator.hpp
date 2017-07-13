@@ -44,7 +44,7 @@ public:
                 "borders skipped:", m_skippedBorders, "selected polygons:", m_selectedPolygons));
   }
 
-  void LoadWaterGeometry(string const & rawGeometryFileName)
+  void LoadWaterGeometry(std::string const & rawGeometryFileName)
   {
     LOG_SHORT(LINFO, ("Loading water geometry:", rawGeometryFileName));
     FileReader reader(rawGeometryFileName);
@@ -312,7 +312,7 @@ class CountryMapGenerator
   FeatureOutT m_bucket;
 
 public:
-  explicit CountryMapGenerator(feature::GenerateInfo const & info) : m_bucket(info) {}
+  CountryMapGenerator(feature::GenerateInfo const & info) : m_bucket(info) {}
 
   void operator()(FeatureBuilder1 fb)
   {

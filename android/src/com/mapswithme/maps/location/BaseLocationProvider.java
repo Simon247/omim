@@ -1,70 +1,43 @@
 package com.mapswithme.maps.location;
 
+import android.support.annotation.NonNull;
 
-import android.location.Location;
-import android.location.LocationListener;
-import android.os.Bundle;
-
-import com.mapswithme.util.LocationUtils;
 import com.mapswithme.util.log.Logger;
-import com.mapswithme.util.log.SimpleLogger;
+import com.mapswithme.util.log.LoggerFactory;
 
-abstract class BaseLocationProvider implements LocationListener
+abstract class BaseLocationProvider
 {
-  private static final double DEFAULT_SPEED_MPS = 5;
-
-  protected static final Logger sLogger = SimpleLogger.get(BaseLocationProvider.class.getName());
-  protected static final long UPDATE_INTERVAL_MS = 500;
-
-  protected abstract void startUpdates();
-
-  protected abstract void stopUpdates();
-
-  protected boolean isLocationBetterThanLast(Location newLocation, Location lastLocation)
+  static final Logger LOGGER = LoggerFactory.INSTANCE.getLogger(LoggerFactory.Type.LOCATION);
+  private static final String TAG = BaseLocationProvider.class.getSimpleName();
+  @NonNull
+  private final LocationFixChecker mLocationFixChecker;
+  private boolean mActive;
+  @NonNull
+  LocationFixChecker getLocationFixChecker()
   {
-    double speed = Math.max(DEFAULT_SPEED_MPS, (newLocation.getSpeed() + lastLocation.getSpeed()) / 2.0);
-    double lastAccuracy = (lastLocation.getAccuracy() + speed * LocationUtils.getDiffWithLastLocation(lastLocation, newLocation));
-    return (newLocation.getAccuracy() < lastAccuracy);
+    return mLocationFixChecker;
   }
 
-  protected final boolean isLocationBetterThanLast(Location newLocation)
+  BaseLocationProvider(@NonNull LocationFixChecker locationFixChecker)
   {
-    if (newLocation == null)
-      return false;
-
-    final Location lastLocation = LocationHelper.INSTANCE.getSavedLocation();
-    return (lastLocation == null || isLocationBetterThanLast(newLocation, lastLocation));
+    mLocationFixChecker = locationFixChecker;
   }
 
-  @Override
-  public void onLocationChanged(Location location)
-  {
-    // Completely ignore locations without lat and lon
-    if (location.getAccuracy() <= 0.0)
-      return;
+  protected abstract void start();
+  protected abstract void stop();
 
-    if (isLocationBetterThanLast(location))
-    {
-      LocationHelper.INSTANCE.initMagneticField(location);
-      LocationHelper.INSTANCE.saveLocation(location);
-    }
+  /**
+   * Indicates whether this provider is providing location updates or not
+   * @return true - if locations are actively coming from this provider, false - otherwise
+   */
+  public final boolean isActive()
+  {
+    return mActive;
   }
 
-  @Override
-  public void onProviderDisabled(String provider)
+  final void setActive(boolean active)
   {
-    sLogger.d("Disabled location provider: ", provider);
-  }
-
-  @Override
-  public void onProviderEnabled(String provider)
-  {
-    sLogger.d("Enabled location provider: ", provider);
-  }
-
-  @Override
-  public void onStatusChanged(String provider, int status, Bundle extras)
-  {
-    sLogger.d("Status changed for location provider: ", provider, status);
+    LOGGER.d(TAG, "setActive active = " + active);
+    mActive = active;
   }
 }

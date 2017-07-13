@@ -4,6 +4,7 @@
 #include "base/stl_helpers.hpp"
 
 #include "std/algorithm.hpp"
+#include "std/utility.hpp"
 
 using editor::XMLFeature;
 
@@ -11,7 +12,7 @@ namespace osm
 {
 using editor::XMLFeature;
 
-constexpr double kPointDiffEps = MercatorBounds::GetCellID2PointAbsEpsilon();
+constexpr double kPointDiffEps = 1e-5;
 
 bool PointsEqual(m2::PointD const & a, m2::PointD const & b)
 {
@@ -88,13 +89,12 @@ vector<m2::PointD> GetWaysOrRelationsGeometry(pugi::xml_document const & osmResp
   return GetRelationsGeometry(osmResponse, wayOrRelation);
 }
 
-/// @returns value form [-0.5, 0.5]. Negative values are used as penalty,
-/// positive as score.
-/// @param osmResponse - nodes, ways and relations from osm
-/// @param wayOrRelation - either way or relation to be compared agains ourGeometry
-/// @param outGeometry - geometry of a FeatureType (ourGeometry must be sort-uniqued)
+/// @returns value form [-1, 1]. Negative values are used as penalty, positive as score.
+/// @param osmResponse - nodes, ways and relations from osm;
+/// @param wayOrRelation - either way or relation to be compared agains ourGeometry;
+/// @param outGeometry - geometry of a FeatureType (ourGeometry must be sort-uniqued);
 double ScoreGeometry(pugi::xml_document const & osmResponse,
-                     pugi::xml_node const & wayOrRelation, vector<m2::PointD> ourGeometry)
+                     pugi::xml_node const & wayOrRelation, vector<m2::PointD> const & ourGeometry)
 {
   ASSERT(!ourGeometry.empty(), ("Our geometry cannot be empty"));
   int matched = 0;
@@ -127,9 +127,12 @@ double ScoreGeometry(pugi::xml_document const & osmResponse,
     }
   }
 
-  auto const wayScore = static_cast<double>(matched) / theirGeometry.size() - 0.5;
-  auto const geomScore = static_cast<double>(matched) / ourGeometry.size() - 0.5;
-  auto const result = wayScore <= 0 || geomScore <= 0
+  auto const wayScore = static_cast<double>(matched) / theirGeometry.size();
+  auto const geomScore = static_cast<double>(matched) / ourGeometry.size();
+  // Our geometry is less detailed and we expect the pair to be found for more than half of points.
+  // OSM geometry is more detailed and we expect the pair to be found for at least a quarter of
+  // the points.
+  auto const result = wayScore < 0.25 || geomScore <= 0.5
       ? -1
       : 2 / (1 / wayScore + 1 / geomScore);
 

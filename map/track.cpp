@@ -27,7 +27,7 @@ double Track::GetLengthMeters() const
 {
   double res = 0.0;
 
-  PolylineD::TIter i = m_polyline.Begin();
+  auto i = m_polyline.Begin();
   double lat1 = MercatorBounds::YToLat(i->y);
   double lon1 = MercatorBounds::XToLon(i->x);
   for (++i; i != m_polyline.End(); ++i)
@@ -62,12 +62,7 @@ float Track::GetLayerDepth(size_t layerIndex) const
   return 0 + layerIndex * 10;
 }
 
-size_t Track::GetPointCount() const
+std::vector<m2::PointD> const & Track::GetPoints() const
 {
-  return m_polyline.GetSize();
-}
-
-m2::PointD const & Track::GetPoint(size_t pointIndex) const
-{
-  return m_polyline.GetPoint(pointIndex);
+  return m_polyline.GetPoints();
 }

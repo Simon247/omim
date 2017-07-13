@@ -1,14 +1,7 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg width="17px" height="17px" viewBox="0 0 17 17" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:sketch="http://www.bohemiancoding.com/sketch/ns">
-    <!-- Generator: Sketch 3.4.2 (15857) - http://www.bohemiancoding.com/sketch -->
-    <title>cafe-s</title>
-    <desc>Created with Sketch.</desc>
-    <defs></defs>
-    <g id="POI" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" sketch:type="MSPage">
-        <g id="cafe-s" sketch:type="MSLayerGroup">
-            <circle id="Oval-1-Copy-43" fill="#FFFFFF" sketch:type="MSShapeGroup" cx="8.5" cy="8.5" r="8.5"></circle>
-            <circle id="Oval-1-Copy-42" fill="#AB842F" sketch:type="MSShapeGroup" cx="8.5" cy="8.5" r="7.5"></circle>
-            <path d="M5.5,5 C5.22299,5 5,5.223 5,5.5 L5,10 C5,10.277 5.22299,10.5 5.5,10.5 L11.5,10.5 C11.777,10.5 12,10.277 12,10 L12,9.5 L12.25,9.5 C12.5,9.5 12.5,9.25 12.5,9.25 L12.5,9 L13,9 C13.5,9 14,8.5 14,8 L14,7.5 L14,6.5 C14,6.25 13.75,6 13.5,6 L12,6 L12,5.5 C12,5.223 11.777,5 11.5,5 L5.5,5 Z M12,6.5 L13.25,6.5 C13.5,6.5 13.5,6.75 13.5,6.75 L13.5,8 C13.5,8.25 13.25,8.5 13,8.5 L12.5,8.5 L12,8.5 L12,6.5 Z M4,11 L6,12 L11,12 L13,11 L4,11 Z" id="rect9826-2-1-5" fill="#FFFFFF" sketch:type="MSShapeGroup"></path>
-        </g>
-    </g>
+<svg width="16" height="16" viewBox="0 0 16 16">
+  <g fill="none" fill-rule="evenodd">
+    <circle cx="8" cy="8" r="8" fill="#FFF" opacity=".6"/>
+    <circle cx="8" cy="8" r="7" fill="#BB9342"/>
+    <path fill="#FFF" fill-rule="nonzero" d="M7.6,3 C7.6,3.51111112 7.5125,3.5125 7.3125,3.7125 C7.1125,3.9125 6.8,4.31111112 6.8,5 L7.6,5 C7.6,4.48888888 7.6875,4.4875 7.8875,4.2875 C8.0875,4.0875 8.4,3.68888888 8.4,3 L7.6,3 Z M9.075,3.4 C9.075,4.36 8.4,4.36 8.4,5 L9.2,5 C9.2,4.4 9.875,4.48 9.875,3.4 L9.075,3.4 Z M5.2,5.4 L5.2,7.8 C5.2,8.68 5.92,9.4 6.8,9.4 L9.2,9.4 C9.96032,9.4 10.5897432,8.8637696 10.75,8.15 C11.4655028,7.9904768 12,7.3637084 12,6.6 L12,6.2 C12,5.99111112 11.9258124,5.7758122 11.775,5.625 C11.6241876,5.4741878 11.4088888,5.4 11.2,5.4 L10.8,5.4 L8,5.4 L5.2,5.4 Z M10.8,6.2 L11.2,6.2 L11.2,6.6 C11.2,6.9240432 11.0459728,7.1711044 10.8,7.3 L10.8,6.2 Z M4,9.8 C4,10.48 4.52,11 5.2,11 L10.8,11 C11.48,11 12,10.48 12,9.8 L4,9.8 Z"/>
+  </g>
 </svg>

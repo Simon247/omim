@@ -5,7 +5,9 @@ import android.content.res.Resources;
 import android.content.res.TypedArray;
 import android.os.Bundle;
 import android.support.annotation.ArrayRes;
+import android.support.annotation.CallSuper;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentActivity;
 import android.support.v4.app.FragmentManager;
@@ -29,7 +31,7 @@ import com.mapswithme.maps.base.BaseMwmDialogFragment;
 import com.mapswithme.util.ThemeUtils;
 import com.mapswithme.util.UiUtils;
 
-abstract class BaseNewsFragment extends BaseMwmDialogFragment
+public abstract class BaseNewsFragment extends BaseMwmDialogFragment
 {
   private ViewPager mPager;
   private View mPrevButton;
@@ -38,6 +40,9 @@ abstract class BaseNewsFragment extends BaseMwmDialogFragment
   private ImageView[] mDots;
 
   private int mPageCount;
+
+  @Nullable
+  private NewsDialogListener mListener;
 
   abstract class Adapter extends PagerAdapter
   {
@@ -158,8 +163,6 @@ abstract class BaseNewsFragment extends BaseMwmDialogFragment
 
   void onSwitchChanged(int index, boolean isChecked) {}
 
-  void onClosed() {}
-
   private void update()
   {
     int cur = mPager.getCurrentItem();
@@ -279,8 +282,7 @@ abstract class BaseNewsFragment extends BaseMwmDialogFragment
       @Override
       public void onClick(View v)
       {
-        onClosed();
-        dismiss();
+        onDoneClick();
       }
     });
 
@@ -288,13 +290,27 @@ abstract class BaseNewsFragment extends BaseMwmDialogFragment
     return res;
   }
 
+  @CallSuper
+  protected void onDoneClick()
+  {
+    dismissAllowingStateLoss();
+    if (mListener != null)
+      mListener.onDialogDone();
+  }
+
   @SuppressWarnings("TryWithIdenticalCatches")
-  static void create(FragmentActivity activity, Class<? extends BaseNewsFragment> clazz)
+  static void create(@NonNull FragmentActivity activity,
+                     @NonNull Class<? extends BaseNewsFragment> clazz,
+                     @Nullable NewsDialogListener listener)
   {
     try
     {
       final BaseNewsFragment fragment = clazz.newInstance();
-      fragment.show(activity.getSupportFragmentManager(), clazz.getName());
+      fragment.mListener = listener;
+      activity.getSupportFragmentManager()
+          .beginTransaction()
+          .add(fragment, clazz.getName())
+          .commitAllowingStateLoss();
     } catch (java.lang.InstantiationException ignored)
     {}
     catch (IllegalAccessException ignored)
@@ -314,5 +330,16 @@ abstract class BaseNewsFragment extends BaseMwmDialogFragment
     fm.beginTransaction().remove(f).commitAllowingStateLoss();
     fm.executePendingTransactions();
     return true;
+  }
+
+  @Nullable
+  protected NewsDialogListener getListener()
+  {
+    return mListener;
+  }
+
+  public interface NewsDialogListener
+  {
+    void onDialogDone();
   }
 }

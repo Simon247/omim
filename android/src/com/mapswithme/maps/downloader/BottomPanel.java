@@ -1,8 +1,8 @@
 package com.mapswithme.maps.downloader;
 
+import android.support.design.widget.FloatingActionButton;
 import android.view.View;
 import android.widget.Button;
-import android.widget.TextView;
 
 import java.util.Locale;
 
@@ -14,8 +14,7 @@ import com.mapswithme.util.statistics.Statistics;
 class BottomPanel
 {
   private final DownloaderFragment mFragment;
-  private final View mFrame;
-  private final TextView mText;
+  private final FloatingActionButton mFab;
   private final Button mButton;
 
   private final View.OnClickListener mDownloadListener = new View.OnClickListener()
@@ -23,13 +22,18 @@ class BottomPanel
     @Override
     public void onClick(View v)
     {
-      MapManager.nativeDownload(mFragment.getAdapter().getCurrentParent());
-
-      Statistics.INSTANCE.trackEvent(Statistics.EventName.DOWNLOADER_ACTION,
-                                     Statistics.params().add(Statistics.EventParam.ACTION, "download")
-                                                        .add(Statistics.EventParam.FROM, "downloader")
-                                                        .add("is_auto", "false")
-                                                        .add("scenario", "download_group"));
+      MapManager.warn3gAndDownload(mFragment.getActivity(), mFragment.getCurrentRoot(), new Runnable()
+      {
+        @Override
+        public void run()
+        {
+          Statistics.INSTANCE.trackEvent(Statistics.EventName.DOWNLOADER_ACTION,
+                                         Statistics.params().add(Statistics.EventParam.ACTION, "download")
+                                                            .add(Statistics.EventParam.FROM, "downloader")
+                                                            .add("is_auto", "false")
+                                                            .add("scenario", "download_group"));
+        }
+      });
     }
   };
 
@@ -38,13 +42,21 @@ class BottomPanel
     @Override
     public void onClick(View v)
     {
-      MapManager.nativeUpdate(mFragment.getAdapter().getCurrentParent());
+      final String country = mFragment.getCurrentRoot();
+      MapManager.warnOn3gUpdate(mFragment.getActivity(), country, new Runnable()
+      {
+        @Override
+        public void run()
+        {
+          MapManager.nativeUpdate(country);
 
-      Statistics.INSTANCE.trackEvent(Statistics.EventName.DOWNLOADER_ACTION,
-                                     Statistics.params().add(Statistics.EventParam.ACTION, "update")
-                                                        .add(Statistics.EventParam.FROM, "downloader")
-                                                        .add("is_auto", "false")
-                                                        .add("scenario", "update_all"));
+          Statistics.INSTANCE.trackEvent(Statistics.EventName.DOWNLOADER_ACTION,
+                                         Statistics.params().add(Statistics.EventParam.ACTION, "update")
+                                                            .add(Statistics.EventParam.FROM, "downloader")
+                                                            .add("is_auto", "false")
+                                                            .add("scenario", "update_all"));
+        }
+      });
     }
   };
 
@@ -53,7 +65,7 @@ class BottomPanel
     @Override
     public void onClick(View v)
     {
-        MapManager.nativeCancel(mFragment.getAdapter().getCurrentParent());
+        MapManager.nativeCancel(mFragment.getCurrentRoot());
 
         Statistics.INSTANCE.trackEvent(Statistics.EventName.DOWNLOADER_CANCEL,
                                        Statistics.params().add(Statistics.EventParam.FROM, "downloader"));
@@ -63,30 +75,39 @@ class BottomPanel
   BottomPanel(DownloaderFragment fragment, View frame)
   {
     mFragment = fragment;
-    mFrame = frame;
-    mText = (TextView) mFrame.findViewById(R.id.tv__text);
-    mButton = (Button) mFrame.findViewById(R.id.btn__action);
+
+    mFab = (FloatingActionButton) frame.findViewById(R.id.fab);
+    mFab.setOnClickListener(new View.OnClickListener()
+    {
+      @Override
+      public void onClick(View v)
+      {
+        if (mFragment.getAdapter() != null )
+          mFragment.getAdapter().setAvailableMapsMode();
+        update();
+      }
+    });
+
+    mButton = (Button) frame.findViewById(R.id.action);
+
+    UiUtils.updateAccentButton(mButton);
   }
 
   private void setUpdateAllState(UpdateInfo info)
   {
-    UiUtils.setTextAndShow(mText, String.format(Locale.US, "%s: %d (%s)", mFragment.getString(R.string.downloader_status_maps),
-                                                                          info.filesCount,
-                                                                          StringUtils.getFileSizeString(info.totalSize)));
-    mButton.setText(R.string.downloader_update_all_button);
+    mButton.setText(String.format(Locale.US, "%s (%s)", mFragment.getString(R.string.downloader_update_all_button),
+                                                        StringUtils.getFileSizeString(info.totalSize)));
     mButton.setOnClickListener(mUpdateListener);
   }
 
   private void setDownloadAllState()
   {
-    UiUtils.invisible(mText);
     mButton.setText(R.string.downloader_download_all_button);
     mButton.setOnClickListener(mDownloadListener);
   }
 
   private void setCancelState()
   {
-    UiUtils.invisible(mText);
     mButton.setText(R.string.downloader_cancel_all);
     mButton.setOnClickListener(mCancelListener);
   }
@@ -94,31 +115,27 @@ class BottomPanel
   public void update()
   {
     DownloaderAdapter adapter = mFragment.getAdapter();
-    boolean search = adapter.isSearchResultsMode();
+    boolean search = adapter != null && adapter.isSearchResultsMode();
 
     boolean show = !search;
+    UiUtils.showIf(show && adapter != null && adapter.isMyMapsMode(), mFab);
+
     if (show)
     {
-      String root = adapter.getCurrentParent();
-
-      if (root == null)
-      {
-        if (MapManager.nativeIsDownloading())
-          setCancelState();
-        else
-        {
-          UpdateInfo info = MapManager.nativeGetUpdateInfo(null);
-          show = (info != null && info.filesCount > 0);
-          if (show)
-            setUpdateAllState(info);
-        }
-      }
-      else
+      String root = adapter != null ? adapter.getCurrentRootId() : "";
+      if (adapter != null && adapter.isMyMapsMode())
       {
         int status = MapManager.nativeGetStatus(root);
         switch (status)
         {
+        case CountryItem.STATUS_UPDATABLE:
+          UpdateInfo info = MapManager.nativeGetUpdateInfo(root);
+          setUpdateAllState(info);
+          break;
+
+        case CountryItem.STATUS_DOWNLOADABLE:  // Special case for "Countries" node when no maps currently downloaded.
         case CountryItem.STATUS_DONE:
+        case CountryItem.STATUS_PARTLY:
           show = false;
           break;
 
@@ -127,12 +144,43 @@ class BottomPanel
           setCancelState();
           break;
 
-        default:
+        case CountryItem.STATUS_FAILED:
           setDownloadAllState();
+          break;
+
+        default:
+          throw new IllegalArgumentException("Inappropriate status for \"" + root + "\": " + status);
+        }
+      }
+      else
+      {
+        show = !CountryItem.isRoot(root);
+        if (show)
+        {
+          int status = MapManager.nativeGetStatus(root);
+          switch (status)
+          {
+          case CountryItem.STATUS_UPDATABLE:
+            UpdateInfo info = MapManager.nativeGetUpdateInfo(root);
+            setUpdateAllState(info);
+            break;
+
+          case CountryItem.STATUS_DONE:
+            show = false;
+            break;
+
+          case CountryItem.STATUS_PROGRESS:
+          case CountryItem.STATUS_ENQUEUED:
+            setCancelState();
+            break;
+
+          default:
+            setDownloadAllState();
+          }
         }
       }
     }
 
-    UiUtils.showIf(show, mFrame);
+    UiUtils.showIf(show, mButton);
   }
 }

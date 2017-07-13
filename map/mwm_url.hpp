@@ -3,6 +3,7 @@
 #include "geometry/rect2d.hpp"
 
 #include "std/string.hpp"
+#include "std/vector.hpp"
 
 class ApiMarkPoint;
 class BookmarkManager;
@@ -19,18 +20,50 @@ struct ApiPoint
   string m_style;
 };
 
+struct RoutePoint
+{
+  RoutePoint() = default;
+  RoutePoint(m2::PointD const & org, string const & name) : m_org(org), m_name(name) {}
+  m2::PointD m_org = m2::PointD::Zero();
+  string m_name;
+};
+
+struct SearchRequest
+{
+  string m_query;
+  string m_locale;
+  double m_centerLat = 0.0;
+  double m_centerLon = 0.0;
+  bool m_isSearchOnMap = false;
+};
+
+
+namespace lead
+{
+struct CampaignDescription;
+}
+
 class Uri;
 
-/// Handles [mapswithme|mwm]://map?params - everything related to displaying info on a map
+/// Handles [mapswithme|mwm|mapsme]://map|route|search?params - everything related to displaying info on a map
 class ParsedMapApi
 {
 public:
-  ParsedMapApi();
+  enum class ParsingResult
+  {
+    Incorrect,
+    Map,
+    Route,
+    Search,
+    Lead
+  };
+
+  ParsedMapApi() = default;
 
   void SetBookmarkManager(BookmarkManager * manager);
 
-  bool SetUriAndParse(string const & url);
-  bool IsValid() const;
+  ParsingResult SetUriAndParse(string const & url);
+  bool IsValid() const { return m_isValid; }
   string const & GetGlobalBackUrl() const { return m_globalBackUrl; }
   string const & GetAppTitle() const { return m_appTitle; }
   int GetApiVersion() const { return m_version; }
@@ -40,19 +73,28 @@ public:
   /// @name Used in settings map viewport after invoking API.
   bool GetViewportRect(m2::RectD & rect) const;
   ApiMarkPoint const * GetSinglePoint() const;
-
+  vector<RoutePoint> const & GetRoutePoints() const { return m_routePoints; }
+  string const & GetRoutingType() const { return m_routingType; }
+  SearchRequest const & GetSearchRequest() const { return m_request; }
 private:
-  bool Parse(Uri const & uri);
-  void AddKeyValue(string key, string const & value, vector<ApiPoint> & points);
+  ParsingResult Parse(Uri const & uri);
+  bool AddKeyValue(string const & key, string const & value, vector<ApiPoint> & points);
+  bool RouteKeyValue(string const & key, string const & value, vector<string> & pattern);
+  bool SearchKeyValue(string const & key, string const & value, SearchRequest & request) const;
+  bool LeadKeyValue(string const & key, string const & value, lead::CampaignDescription & description) const;
 
-  BookmarkManager * m_bmManager;
+  BookmarkManager * m_bmManager = nullptr;
+  vector<RoutePoint> m_routePoints;
+  SearchRequest m_request;
   string m_globalBackUrl;
   string m_appTitle;
-  int m_version;
+  string m_routingType;
+  int m_version = 0;
   /// Zoom level in OSM format (e.g. from 1.0 to 20.0)
   /// Taken into an account when calculating viewport rect, but only if points count is == 1
-  double m_zoomLevel;
-  bool m_goBackOnBalloonClick;
+  double m_zoomLevel = 0.0;
+  bool m_goBackOnBalloonClick = false;
+  bool m_isValid = false;
 };
 
 }

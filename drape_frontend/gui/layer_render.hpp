@@ -27,13 +27,16 @@ public:
   ~LayerRenderer();
 
   void Build(ref_ptr<dp::GpuProgramManager> mng);
-  void Render(ref_ptr<dp::GpuProgramManager> mng, ScreenBase const & screen);
+  void Render(ref_ptr<dp::GpuProgramManager> mng, bool routingActive,
+              ScreenBase const & screen);
   void Merge(ref_ptr<LayerRenderer> other);
   void SetLayout(gui::TWidgetsLayoutInfo const & info);
 
   bool OnTouchDown(m2::RectD const & touchArea);
   void OnTouchUp(m2::RectD const & touchArea);
   void OnTouchCancel(m2::RectD const & touchArea);
+
+  bool HasWidget(EWidget widget) const;
 
 private:
   void DestroyRenderers();
@@ -53,9 +56,12 @@ class LayerCacher
 {
 public:
   drape_ptr<LayerRenderer> RecacheWidgets(TWidgetsInitInfo const & initInfo,
-                                          TWidgetsSizeInfo & sizeInfo,
                                           ref_ptr<dp::TextureManager> textures);
   drape_ptr<LayerRenderer> RecacheChoosePositionMark(ref_ptr<dp::TextureManager> textures);
+
+#ifdef RENRER_DEBUG_INFO_LABELS
+  drape_ptr<LayerRenderer> RecacheDebugLabels(ref_ptr<dp::TextureManager> textures);
+#endif
 
 private:
   m2::PointF CacheCompass(Position const & position, ref_ptr<LayerRenderer> renderer, ref_ptr<dp::TextureManager> textures);

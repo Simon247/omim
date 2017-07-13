@@ -7,11 +7,13 @@
 #include "base/logging.hpp"
 #include "base/string_utils.hpp"
 
-#include "std/algorithm.hpp"
-#include "std/cctype.hpp"
-#include "std/cmath.hpp"
-#include "std/cstdlib.hpp"
-#include "std/unordered_set.hpp"
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdlib>
+#include <unordered_set>
+
+using namespace std;
 
 namespace
 {
@@ -29,7 +31,7 @@ void RemoveDuplicatesAndKeepOrder(vector<T> & vec)
     seen.insert(value);
     return false;
   };
-  vec.erase(std::remove_if(vec.begin(), vec.end(), predicate), vec.end());
+  vec.erase(remove_if(vec.begin(), vec.end(), predicate), vec.end());
 }
 
 // Also filters out duplicates.
@@ -85,6 +87,18 @@ string MetadataTagProcessorImpl::ValidateAndFormat_stars(string const & v) const
   return string(1, v[0]);
 }
 
+string MetadataTagProcessorImpl::ValidateAndFormat_price_rate(string const & v) const
+{
+  if (v.size() != 1)
+    return string();
+
+  // Price rate is a single digit from 0 to 5.
+  if (v[0] < '0' || v[0] > '5')
+    return string();
+
+  return v;
+}
+
 string MetadataTagProcessorImpl::ValidateAndFormat_operator(string const & v) const
 {
   auto const & isATM = ftypes::IsATMChecker::Instance();
@@ -113,7 +127,7 @@ string MetadataTagProcessorImpl::ValidateAndFormat_opening_hours(string const & 
 
 string MetadataTagProcessorImpl::ValidateAndFormat_ele(string const & v) const
 {
-  return MeasurementUtils::OSMDistanceToMetersString(v);
+  return measurement_utils::OSMDistanceToMetersString(v);
 }
 
 string MetadataTagProcessorImpl::ValidateAndFormat_turn_lanes(string const & v) const
@@ -152,12 +166,15 @@ string MetadataTagProcessorImpl::ValidateAndFormat_internet(string v) const
   strings::AsciiToLower(v);
   if (v == "wlan" || v == "wired" || v == "yes" || v == "no")
     return v;
+  // Process wifi=free tag.
+  if (v == "free")
+    return "wlan";
   return {};
 }
 
 string MetadataTagProcessorImpl::ValidateAndFormat_height(string const & v) const
 {
-  return MeasurementUtils::OSMDistanceToMetersString(v, false /*supportZeroAndNegativeValues*/, 1);
+  return measurement_utils::OSMDistanceToMetersString(v, false /*supportZeroAndNegativeValues*/, 1);
 }
 
 string MetadataTagProcessorImpl::ValidateAndFormat_building_levels(string v) const
@@ -173,6 +190,24 @@ string MetadataTagProcessorImpl::ValidateAndFormat_building_levels(string v) con
     return strings::to_string_dac(levels, 1);
 
   return {};
+}
+
+string MetadataTagProcessorImpl::ValidateAndFormat_sponsored_id(string const & v) const
+{
+  uint64_t id;
+  if (!strings::to_uint64(v, id))
+    return string();
+  return v;
+}
+
+string MetadataTagProcessorImpl::ValidateAndFormat_rating(string const & v) const
+{
+  double rating;
+  if (!strings::to_double(v, rating))
+    return string();
+  if (rating > 0 && rating <= 10)
+    return strings::to_string_dac(rating, 1);
+  return string();
 }
 
 string MetadataTagProcessorImpl::ValidateAndFormat_denomination(string const & v) const

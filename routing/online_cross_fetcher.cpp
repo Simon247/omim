@@ -1,4 +1,4 @@
-#include "online_cross_fetcher.hpp"
+#include "routing/online_cross_fetcher.hpp"
 
 #include "platform/http_request.hpp"
 
@@ -62,9 +62,9 @@ OnlineCrossFetcher::OnlineCrossFetcher(string const & serverURL, ms::LatLon cons
 void OnlineCrossFetcher::Do()
 {
   m_mwmPoints.clear();
-  if (m_request.RunHTTPRequest() && m_request.error_code() == 200 && !m_request.was_redirected())
-    ParseResponse(m_request.server_response(), m_mwmPoints);
+  if (m_request.RunHttpRequest() && m_request.ErrorCode() == 200 && !m_request.WasRedirected())
+    ParseResponse(m_request.ServerResponse(), m_mwmPoints);
   else
-    LOG(LWARNING, ("Can't get OSRM server response. Code: ", m_request.error_code()));
+    LOG(LWARNING, ("Can't get OSRM server response. Code: ", m_request.ErrorCode()));
 }
 }  // namespace routing

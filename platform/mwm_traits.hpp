@@ -38,14 +38,25 @@ public:
     Unknown
   };
 
-  MwmTraits(version::Format versionFormat);
+  MwmTraits(MwmVersion const & version);
 
   SearchIndexFormat GetSearchIndexFormat() const;
 
   HouseToStreetTableFormat GetHouseToStreetTableFormat() const;
 
+  bool HasOffsetsTable() const;
+
+  bool HasCrossMwmSection() const;
+
+  // The new routing section with IndexGraph was added in december 2016.
+  // Check whether mwm has routing index section.
+  bool HasRoutingIndex() const;
+
 private:
-  version::Format m_versionFormat;
+  Format GetFormat() const { return m_version.GetFormat(); }
+  uint32_t GetVersion() const { return m_version.GetVersion(); }
+
+  MwmVersion m_version;
 };
 
 string DebugPrint(MwmTraits::SearchIndexFormat format);

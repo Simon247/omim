@@ -1,40 +1,39 @@
 #include "qt/create_feature_dialog.hpp"
 
-#include "editor/new_feature_categories.hpp"
+#include "platform/preferred_languages.hpp"
+
+#include "indexer/new_feature_categories.hpp"
 
 #include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QListWidget>
 #include <QtWidgets/QVBoxLayout>
 
-CreateFeatureDialog::CreateFeatureDialog(QWidget * parent, osm::NewFeatureCategories const & cats)
+CreateFeatureDialog::CreateFeatureDialog(QWidget * parent, osm::NewFeatureCategories & cats)
   : QDialog(parent)
 {
-  QListWidget * lastUsedList = new QListWidget();
-  for (auto const & cat : cats.m_lastUsed)
-  {
-    QListWidgetItem * lwi = new QListWidgetItem(cat.m_name.c_str(), lastUsedList);
-    lwi->setData(Qt::UserRole, cat.m_type);
-  }
-  connect(lastUsedList, SIGNAL(clicked(QModelIndex const &)), this, SLOT(OnListItemSelected(QModelIndex const &)));
+  cats.AddLanguage("en");  // Default.
+  cats.AddLanguage(languages::GetCurrentNorm());
 
   QListWidget * allSortedList = new QListWidget();
-  for (auto const & cat : cats.m_allSorted)
-  {
-    QListWidgetItem * lwi = new QListWidgetItem(cat.m_name.c_str(), allSortedList);
-    lwi->setData(Qt::UserRole, cat.m_type);
-  }
-  connect(allSortedList, SIGNAL(clicked(QModelIndex const &)), this, SLOT(OnListItemSelected(QModelIndex const &)));
 
-  QVBoxLayout * vBox = new QVBoxLayout();
-  vBox->addWidget(lastUsedList);
-  vBox->addWidget(allSortedList);
+  auto const & categories = cats.GetAllCategoryNames(languages::GetCurrentNorm());
+  for (auto const & entry : categories)
+  {
+    QListWidgetItem * lwi = new QListWidgetItem(entry.first.c_str() /* name */, allSortedList);
+    lwi->setData(Qt::UserRole, entry.second /* type */);
+  }
+  connect(allSortedList, SIGNAL(clicked(QModelIndex const &)), this,
+          SLOT(OnListItemSelected(QModelIndex const &)));
 
   QDialogButtonBox * dbb = new QDialogButtonBox();
   dbb->addButton(QDialogButtonBox::Close);
-  connect(dbb, SIGNAL(clicked(QAbstractButton*)), this, SLOT(reject()));
-  vBox->addWidget(dbb);
+  connect(dbb, SIGNAL(clicked(QAbstractButton *)), this, SLOT(reject()));
 
+  QVBoxLayout * vBox = new QVBoxLayout();
+  vBox->addWidget(allSortedList);
+  vBox->addWidget(dbb);
   setLayout(vBox);
+
   setWindowTitle("OSM Editor");
 }
 

@@ -1,4 +1,5 @@
 #import "DownloadIndicatorProtocol.h"
+#import "MWMMyTarget.h"
 #import "MWMNavigationController.h"
 
 #include "indexer/map_style.hpp"
@@ -8,16 +9,8 @@
 @class MapViewController;
 @class LocationManager;
 
-typedef NS_ENUM(NSUInteger, MWMRoutingPlaneMode)
-{
-  MWMRoutingPlaneModeNone,
-  MWMRoutingPlaneModePlacePage,
-  MWMRoutingPlaneModeSearchSource,
-  MWMRoutingPlaneModeSearchDestination
-};
-
-@interface MapsAppDelegate : UIResponder<UIApplicationDelegate, UIAlertViewDelegate,
-                                         DownloadIndicatorProtocol>
+@interface MapsAppDelegate
+    : UIResponder<UIApplicationDelegate, UIAlertViewDelegate, DownloadIndicatorProtocol>
 {
   NSInteger m_activeDownloadsCounter;
   UIBackgroundTaskIdentifier m_backgroundTask;
@@ -25,14 +18,16 @@ typedef NS_ENUM(NSUInteger, MWMRoutingPlaneMode)
   UIAlertView * m_loadingAlertView;
 }
 
-@property (nonatomic) UIWindow * window;
-@property (nonatomic) MWMRoutingPlaneMode routingPlaneMode;
+@property(nonatomic) UIWindow * window;
 
-@property (nonatomic, readonly) MapViewController * mapViewController;
-@property (nonatomic, readonly) LocationManager * locationManager;
-@property (nonatomic, readonly) BOOL isDaemonMode;
+@property(nonatomic, readonly) MapViewController * mapViewController;
+@property(nonatomic, readonly) BOOL isDrapeEngineCreated;
+
+@property(nonatomic) MWMMyTarget * myTarget;
 
 + (MapsAppDelegate *)theApp;
+
+- (BOOL)hasApiURL;
 
 - (void)enableStandby;
 - (void)disableStandby;
@@ -44,13 +39,7 @@ typedef NS_ENUM(NSUInteger, MWMRoutingPlaneMode)
 - (void)enableDownloadIndicator;
 
 - (void)showMap;
-- (void)startMapStyleChecker;
-- (void)stopMapStyleChecker;
 - (void)showAlertIfRequired;
-+ (void)setAutoNightModeOff:(BOOL)off;
-+ (BOOL)isAutoNightMode;
-+ (void)resetToDefaultMapStyle;
-+ (void)changeMapStyleIfNedeed;
 
 - (void)setMapStyle:(MapStyle)mapStyle;
 

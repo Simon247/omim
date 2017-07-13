@@ -11,7 +11,7 @@ function BuildDrawingRules() {
   styleType=$1
   styleName=$2
   suffix=${3-}
-  echo "Building drawing rules for style $styleName"
+  echo "Building drawing rules for style $styleType/$styleName"
   # Cleanup
   rm "$DATA_PATH"/drules_proto$suffix.{bin,txt} || true
   # Run script to build style
@@ -30,9 +30,13 @@ done
 # Building drawing rules
 BuildDrawingRules clear  clear _clear
 BuildDrawingRules clear  night _dark
-BuildDrawingRules legacy light _legacy
+BuildDrawingRules vehicle  clear _vehicle_clear
+BuildDrawingRules vehicle  night _vehicle_dark
 
-echo "Merging legacy and new styles"
+# In designer mode we use drules_proto_design file instead of standard ones
+cp $OMIM_PATH/data/drules_proto_clear.bin $OMIM_PATH/data/drules_proto_design.bin
+
+echo "Merging default and vehicle styles"
 python "$OMIM_PATH/tools/python/stylesheet/drules_merge.py" \
-  "$DATA_PATH/drules_proto_legacy.bin" "$DATA_PATH/drules_proto_clear.bin" \
+  "$DATA_PATH/drules_proto_clear.bin" "$DATA_PATH/drules_proto_vehicle_clear.bin" \
   "$DATA_PATH/drules_proto.bin" "$DATA_PATH/drules_proto.txt" > /dev/null

@@ -43,7 +43,7 @@ struct FeatureGraphNode
 struct RawPathData
 {
   NodeID node;
-  EdgeWeight segmentWeight;
+  EdgeWeight segmentWeight;  // Time in tenths of a second to pass |node|.
 
   RawPathData() : node(SPECIAL_NODEID), segmentWeight(INVALID_EDGE_WEIGHT) {}
 
@@ -51,22 +51,6 @@ struct RawPathData
       : node(node), segmentWeight(segmentWeight)
   {
   }
-};
-
-/*!
- * \brief The OSRM routing result struct. Contains the routing result, it's cost and source and
- * target edges.
- * \property shortestPathLength Length of a founded route.
- * \property unpackedPathSegments Segments of a founded route.
- * \property sourceEdge Source graph node of a route.
- * \property targetEdge Target graph node of a route.
- */
-struct RawRoutingResult
-{
-  int shortestPathLength;
-  vector<vector<RawPathData>> unpackedPathSegments;
-  FeatureGraphNode sourceEdge;
-  FeatureGraphNode targetEdge;
 };
 
 //@todo (dragunov) make proper name
@@ -87,15 +71,4 @@ using TRawDataFacade = OsrmRawDataFacade<QueryEdge::EdgeData>;
    */
 void FindWeightsMatrix(TRoutingNodes const & sources, TRoutingNodes const & targets,
                        TRawDataFacade & facade, vector<EdgeWeight> & result);
-
-/*! Find single shortest path in a single MWM between 2 OSRM nodes
-   * \param source Source OSRM graph node to make path.
-   * \param taget Target OSRM graph node to make path.
-   * \param facade OSRM routing data facade to recover graph information.
-   * \param rawRoutingResult Routing result structure.
-   * \return true when path exists, false otherwise.
-   */
-bool FindSingleRoute(FeatureGraphNode const & source, FeatureGraphNode const & target,
-                     TRawDataFacade & facade, RawRoutingResult & rawRoutingResult);
-
 }  // namespace routing

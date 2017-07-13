@@ -1,6 +1,7 @@
 package com.mapswithme.maps.widget.placepage;
 
 import android.os.Bundle;
+import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v7.widget.Toolbar;
 import android.text.Html;
@@ -49,14 +50,14 @@ public class EditDescriptionFragment extends BaseMwmDialogFragment
   }
 
   @Override
-  public void onViewCreated(View view, Bundle savedInstanceState)
+  public void onViewCreated(@NonNull View view, Bundle savedInstanceState)
   {
-    super.onViewCreated(view, savedInstanceState);
-
     mBookmark = getArguments().getParcelable(EXTRA_BOOKMARK);
-    String description = mBookmark.getBookmarkDescription();
+    String description = null;
+    if (mBookmark != null)
+      description = mBookmark.getBookmarkDescription();
 
-    if (StringUtils.nativeIsHtml(description))
+    if (description != null && StringUtils.nativeIsHtml(description))
     {
       final String descriptionNoSimpleTags = StringUtils.removeEditTextHtmlTags(description);
       if (!StringUtils.nativeIsHtml(descriptionNoSimpleTags))
@@ -79,6 +80,7 @@ public class EditDescriptionFragment extends BaseMwmDialogFragment
   private void initToolbar(View view)
   {
     Toolbar toolbar = (Toolbar) view.findViewById(R.id.toolbar);
+    UiUtils.extendViewWithStatusBar(toolbar);
     final TextView textView = (TextView) toolbar.findViewById(R.id.tv__save);
     textView.setOnClickListener(new View.OnClickListener()
     {

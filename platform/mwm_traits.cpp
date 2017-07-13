@@ -4,20 +4,30 @@
 
 namespace version
 {
-MwmTraits::MwmTraits(version::Format versionFormat) : m_versionFormat(versionFormat) {}
+MwmTraits::MwmTraits(MwmVersion const & version) : m_version(version) {}
 
 MwmTraits::SearchIndexFormat MwmTraits::GetSearchIndexFormat() const
 {
-  if (m_versionFormat < version::Format::v7)
+  if (GetFormat() < version::Format::v7)
     return SearchIndexFormat::FeaturesWithRankAndCenter;
   return SearchIndexFormat::CompressedBitVector;
 }
 
 MwmTraits::HouseToStreetTableFormat MwmTraits::GetHouseToStreetTableFormat() const
 {
-  if (m_versionFormat < version::Format::v7)
+  if (GetFormat() < version::Format::v7)
     return HouseToStreetTableFormat::Unknown;
   return HouseToStreetTableFormat::Fixed3BitsDDVector;
+}
+
+bool MwmTraits::HasOffsetsTable() const { return GetFormat() >= version::Format::v6; }
+
+bool MwmTraits::HasCrossMwmSection() const { return GetFormat() >= version::Format::v9; }
+
+bool MwmTraits::HasRoutingIndex() const
+{
+  uint32_t constexpr kFirstVersionWithRoutingIndex = 161206;
+  return GetVersion() >= kFirstVersionWithRoutingIndex;
 }
 
 string DebugPrint(MwmTraits::SearchIndexFormat format)

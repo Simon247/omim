@@ -8,16 +8,32 @@
 namespace df
 {
 
-EngineContext::EngineContext(TileKey tileKey, ref_ptr<ThreadsCommutator> commutator,
-                             ref_ptr<dp::TextureManager> texMng)
+EngineContext::EngineContext(TileKey tileKey,
+                             ref_ptr<ThreadsCommutator> commutator,
+                             ref_ptr<dp::TextureManager> texMng,
+                             ref_ptr<MetalineManager> metalineMng,
+                             CustomSymbolsContextWeakPtr customSymbolsContext,
+                             bool is3dBuildingsEnabled,
+                             bool isTrafficEnabled,
+                             int displacementMode)
   : m_tileKey(tileKey)
   , m_commutator(commutator)
   , m_texMng(texMng)
+  , m_metalineMng(metalineMng)
+  , m_customSymbolsContext(customSymbolsContext)
+  , m_3dBuildingsEnabled(is3dBuildingsEnabled)
+  , m_trafficEnabled(isTrafficEnabled)
+  , m_displacementMode(displacementMode)
 {}
 
 ref_ptr<dp::TextureManager> EngineContext::GetTextureManager() const
 {
   return m_texMng;
+}
+
+ref_ptr<MetalineManager> EngineContext::GetMetalineManager() const
+{
+  return m_metalineMng;
 }
 
 void EngineContext::BeginReadTile()
@@ -35,6 +51,13 @@ void EngineContext::FlushOverlays(TMapShapes && shapes)
   PostMessage(make_unique_dp<OverlayMapShapeReadedMessage>(m_tileKey, move(shapes)));
 }
 
+void EngineContext::FlushTrafficGeometry(TrafficSegmentsGeometry && geometry)
+{
+  m_commutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                            make_unique_dp<FlushTrafficGeometryMessage>(m_tileKey, move(geometry)),
+                            MessagePriority::Low);
+}
+
 void EngineContext::EndReadTile()
 {
   PostMessage(make_unique_dp<TileReadEndMessage>(m_tileKey));
@@ -45,5 +68,4 @@ void EngineContext::PostMessage(drape_ptr<Message> && message)
   m_commutator->PostMessage(ThreadsCommutator::ResourceUploadThread, move(message),
                             MessagePriority::Normal);
 }
-
-} // namespace df
+}  // namespace df

@@ -16,20 +16,14 @@ extern "C"
 {
 using namespace storage;
 
-// Fixed optimization bug for x86 (reproduced on Asus ME302C).
-#pragma clang push_options
-#pragma clang optimize off
+JNIEXPORT void JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeCompassUpdated(JNIEnv * env, jclass clazz, jdouble magneticNorth, jdouble trueNorth, jboolean forceRedraw)
+{
+  location::CompassInfo info;
+  info.m_bearing = (trueNorth >= 0.0) ? trueNorth : magneticNorth;
 
-  JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MapFragment_nativeCompassUpdated(JNIEnv * env, jclass clazz, jdouble magneticNorth, jdouble trueNorth, jboolean forceRedraw)
-  {
-    location::CompassInfo info;
-    info.m_bearing = (trueNorth >= 0.0) ? trueNorth : magneticNorth;
-
-    g_framework->OnCompassUpdated(info, forceRedraw);
-  }
-
-#pragma clang pop_options
+  g_framework->OnCompassUpdated(info, forceRedraw);
+}
 
 JNIEXPORT void JNICALL
 Java_com_mapswithme_maps_MapFragment_nativeStorageConnected(JNIEnv * env, jclass clazz)
@@ -64,15 +58,12 @@ Java_com_mapswithme_maps_MapFragment_nativeShowMapForUrl(JNIEnv * env, jclass cl
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_mapswithme_maps_MapFragment_nativeCreateEngine(JNIEnv * env, jclass clazz, jobject surface, jint density)
+Java_com_mapswithme_maps_MapFragment_nativeCreateEngine(JNIEnv * env, jclass clazz,
+                                                        jobject surface, jint density,
+                                                        jboolean firstLaunch,
+                                                        jboolean isLaunchByDeepLink)
 {
-  return g_framework->CreateDrapeEngine(env, surface, density);
-}
-
-JNIEXPORT void JNICALL
-Java_com_mapswithme_maps_MapFragment_nativeDestroyEngine(JNIEnv * env, jclass clazz)
-{
-  g_framework->DeleteDrapeEngine();
+  return g_framework->CreateDrapeEngine(env, surface, density, firstLaunch, isLaunchByDeepLink);
 }
 
 JNIEXPORT jboolean JNICALL
@@ -81,16 +72,16 @@ Java_com_mapswithme_maps_MapFragment_nativeIsEngineCreated(JNIEnv * env, jclass 
   return g_framework->IsDrapeEngineCreated();
 }
 
-JNIEXPORT void JNICALL
+JNIEXPORT jboolean JNICALL
 Java_com_mapswithme_maps_MapFragment_nativeAttachSurface(JNIEnv * env, jclass clazz, jobject surface)
 {
-  g_framework->AttachSurface(env, surface);
+  return g_framework->AttachSurface(env, surface);
 }
 
 JNIEXPORT void JNICALL
-Java_com_mapswithme_maps_MapFragment_nativeDetachSurface(JNIEnv * env, jclass clazz)
+Java_com_mapswithme_maps_MapFragment_nativeDetachSurface(JNIEnv * env, jclass clazz, jboolean destroyContext)
 {
-  g_framework->DetachSurface();
+  g_framework->DetachSurface(destroyContext);
 }
 
 JNIEXPORT void JNICALL

@@ -1,36 +1,22 @@
 #pragma once
+
+#include "search/feature_loader.hpp"
 #include "search/projection_on_street.hpp"
 
 #include "indexer/feature_decl.hpp"
-#include "indexer/index.hpp"
 #include "indexer/ftypes_matcher.hpp"
 
 #include "geometry/point2d.hpp"
 
+#include "base/macros.hpp"
+
 #include "std/string.hpp"
 #include "std/queue.hpp"
 
+class Index;
 
 namespace search
 {
-
-class FeatureLoader
-{
-  Index const * m_pIndex;
-  Index::FeaturesLoaderGuard * m_pGuard;
-
-  void CreateLoader(MwmSet::MwmId const & mwmId);
-
-public:
-  FeatureLoader(Index const * pIndex);
-  ~FeatureLoader();
-
-  void Load(FeatureID const & id, FeatureType & f);
-  void Free();
-
-  template <class ToDo> void ForEachInRect(m2::RectD const & rect, ToDo toDo);
-};
-
 struct ParsedNumber
 {
   string m_fullN;
@@ -251,7 +237,7 @@ class HouseDetector
   double GetApprLengthMeters(int index) const;
 
 public:
-  HouseDetector(Index const * pIndex);
+  HouseDetector(Index const & index);
   ~HouseDetector();
 
   int LoadStreets(vector<FeatureID> const & ids);

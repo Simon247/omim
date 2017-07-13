@@ -1,9 +1,11 @@
 #include "routing/turns.hpp"
 
+#include "geometry/angles.hpp"
+
 #include "base/internal/message.hpp"
 
 #include "std/array.hpp"
-
+#include "std/utility.hpp"
 
 namespace
 {
@@ -49,9 +51,102 @@ static_assert(g_turnNames.size() == static_cast<size_t>(TurnDirection::Count),
 
 namespace routing
 {
+// UniNodeId -------------------------------------------------------------------
+std::atomic<NodeID> UniNodeId::m_nextFakeId(0);
+
+UniNodeId::UniNodeId(FeatureID const & featureId, uint32_t startSegId, uint32_t endSegId,
+                     bool forward)
+  : m_type(Type::Mwm)
+  , m_featureId(featureId)
+  , m_startSegId(startSegId)
+  , m_endSegId(endSegId)
+  , m_forward(forward)
+{
+  if (!m_featureId.IsValid())
+  {
+    m_nodeId = m_nextFakeId++;
+    CHECK_NOT_EQUAL(m_nodeId, SPECIAL_NODEID, ());
+  }
+}
+
+bool UniNodeId::operator==(UniNodeId const & rhs) const
+{
+  if (m_type != rhs.m_type)
+    return false;
+
+  switch (m_type)
+  {
+  case Type::Osrm: return m_nodeId == rhs.m_nodeId;
+  case Type::Mwm:
+    return m_featureId == rhs.m_featureId && m_startSegId == rhs.m_startSegId &&
+           m_endSegId == rhs.m_endSegId && m_forward == rhs.m_forward && m_nodeId == rhs.m_nodeId;
+  }
+}
+
+bool UniNodeId::operator<(UniNodeId const & rhs) const
+{
+  if (m_type != rhs.m_type)
+    return m_type < rhs.m_type;
+
+  switch (m_type)
+  {
+  case Type::Osrm: return m_nodeId < rhs.m_nodeId;
+  case Type::Mwm:
+    if (m_featureId != rhs.m_featureId)
+      return m_featureId < rhs.m_featureId;
+
+    if (m_startSegId != rhs.m_startSegId)
+      return m_startSegId < rhs.m_startSegId;
+
+    if (m_endSegId != rhs.m_endSegId)
+      return m_endSegId < rhs.m_endSegId;
+
+    if (m_forward != rhs.m_forward)
+      return m_forward < rhs.m_forward;
+
+    return m_nodeId < rhs.m_nodeId;
+  }
+}
+
+void UniNodeId::Clear()
+{
+  m_featureId = FeatureID();
+  m_startSegId = 0;
+  m_endSegId = 0;
+  m_forward = true;
+  m_nodeId = SPECIAL_NODEID;
+}
+
+uint32_t UniNodeId::GetNodeId() const
+{
+  ASSERT_EQUAL(m_type, Type::Osrm, ());
+  return m_nodeId;
+}
+
+FeatureID const & UniNodeId::GetFeature() const
+{
+  ASSERT_EQUAL(m_type, Type::Mwm, ());
+  return m_featureId;
+}
+
+bool UniNodeId::IsCorrect() const
+{
+  return m_type == Type::Mwm &&
+         ((m_forward && m_startSegId <= m_endSegId) || (!m_forward && m_endSegId <= m_startSegId));
+}
+
+string DebugPrint(UniNodeId::Type type)
+{
+  switch (type)
+  {
+  case UniNodeId::Type::Osrm: return "Osrm";
+  case UniNodeId::Type::Mwm: return "Mwm";
+  }
+}
+
 namespace turns
 {
-
+// SingleLaneInfo --------------------------------------------------------------
 bool SingleLaneInfo::operator==(SingleLaneInfo const & other) const
 {
   return m_lane == other.m_lane && m_isRecommended == other.m_isRecommended;
@@ -276,6 +371,12 @@ string DebugPrint(SingleLaneInfo const & singleLaneInfo)
   out << "SingleLaneInfo [ m_isRecommended == " << singleLaneInfo.m_isRecommended
       << ", m_lane == " << ::DebugPrint(singleLaneInfo.m_lane) << " ]" << endl;
   return out.str();
+}
+
+double PiMinusTwoVectorsAngle(m2::PointD const & junctionPoint, m2::PointD const & ingoingPoint,
+                              m2::PointD const & outgoingPoint)
+{
+  return math::pi - ang::TwoVectorsAngle(junctionPoint, ingoingPoint, outgoingPoint);
 }
 }  // namespace turns
 }  // namespace routing

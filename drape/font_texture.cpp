@@ -1,6 +1,5 @@
 #include "drape/font_texture.hpp"
 #include "drape/pointers.hpp"
-#include "3party/stb_image/stb_image.h"
 
 #include "platform/platform.hpp"
 #include "coding/reader.hpp"
@@ -14,22 +13,6 @@
 #include "std/vector.hpp"
 #include "std/map.hpp"
 #include "std/bind.hpp"
-
-#include <boost/gil/algorithm.hpp>
-#include <boost/gil/typedefs.hpp>
-
-using boost::gil::gray8c_pixel_t;
-using boost::gil::gray8_pixel_t;
-using boost::gil::gray8c_view_t;
-using boost::gil::gray8_view_t;
-using boost::gil::interleaved_view;
-using boost::gil::subimage_view;
-using boost::gil::copy_pixels;
-
-typedef gray8_view_t view_t;
-typedef gray8c_view_t const_view_t;
-typedef gray8_pixel_t pixel_t;
-typedef gray8c_pixel_t const_pixel_t;
 
 namespace dp
 {
@@ -62,6 +45,28 @@ bool GlyphPacker::PackGlyph(uint32_t width, uint32_t height, m2::RectU & rect)
 
   m_cursor.x += width;
   m_yStep = max(height, m_yStep);
+  return true;
+}
+
+bool GlyphPacker::CanBePacked(uint32_t glyphsCount, uint32_t width, uint32_t height) const
+{
+  uint32_t x = m_cursor.x;
+  uint32_t y = m_cursor.y;
+  uint32_t step = m_yStep;
+  for (uint32_t i = 0; i < glyphsCount; i++)
+  {
+    if (x + width > m_size.x)
+    {
+      x = 0;
+      y += step;
+    }
+
+    if (y + height > m_size.y)
+      return false;
+
+    x += width;
+    step = max(height, step);
+  }
   return true;
 }
 
@@ -151,7 +156,7 @@ GlyphIndex::GlyphIndex(m2::PointU size, ref_ptr<GlyphManager> mng)
   , m_generator(new GlyphGenerator(mng, bind(&GlyphIndex::OnGlyphGenerationCompletion, this, _1, _2)))
 {
   // Cache invalid glyph.
-  GlyphKey const key = GlyphKey(m_mng->GetInvalidGlyph().m_code);
+  GlyphKey const key = GlyphKey(m_mng->GetInvalidGlyph(GlyphManager::kDynamicGlyphSize).m_code, GlyphManager::kDynamicGlyphSize);
   bool newResource = false;
   MapResource(key, newResource);
 }
@@ -172,21 +177,21 @@ GlyphIndex::~GlyphIndex()
 ref_ptr<Texture::ResourceInfo> GlyphIndex::MapResource(GlyphKey const & key, bool & newResource)
 {
   newResource = false;
-  strings::UniChar uniChar = key.GetUnicodePoint();
-  auto it = m_index.find(uniChar);
+  auto it = m_index.find(key);
   if (it != m_index.end())
     return make_ref(&it->second);
 
   newResource = true;
 
-  GlyphManager::Glyph glyph = m_mng->GetGlyph(uniChar);
+  GlyphManager::Glyph glyph = m_mng->GetGlyph(key.GetUnicodePoint(), key.GetFixedSize());
   m2::RectU r;
   if (!m_packer.PackGlyph(glyph.m_image.m_width, glyph.m_image.m_height, r))
   {
     glyph.m_image.Destroy();
-    LOG(LWARNING, ("Glyphs packer could not pack a glyph", uniChar));
+    LOG(LWARNING, ("Glyphs packer could not pack a glyph", key.GetUnicodePoint()));
 
-    auto invalidGlyph = m_index.find(m_mng->GetInvalidGlyph().m_code);
+    auto invalidGlyph = m_index.find(GlyphKey(m_mng->GetInvalidGlyph(key.GetFixedSize()).m_code,
+                                              key.GetFixedSize()));
     if (invalidGlyph != m_index.end())
       return make_ref(&invalidGlyph->second);
 
@@ -195,9 +200,22 @@ ref_ptr<Texture::ResourceInfo> GlyphIndex::MapResource(GlyphKey const & key, boo
 
   m_generator->GenerateGlyph(r, glyph);
 
-  auto res = m_index.emplace(uniChar, GlyphInfo(m_packer.MapTextureCoords(r), glyph.m_metrics));
+  auto res = m_index.emplace(key, GlyphInfo(m_packer.MapTextureCoords(r), glyph.m_metrics));
   ASSERT(res.second, ());
   return make_ref(&res.first->second);
+}
+
+bool GlyphIndex::CanBeGlyphPacked(uint32_t glyphsCount) const
+{
+  if (glyphsCount == 0)
+    return true;
+
+  if (m_packer.IsFull())
+    return false;
+
+  float const kGlyphScalar = 1.5f;
+  uint32_t const baseSize = static_cast<uint32_t>(m_mng->GetBaseGlyphHeight() * kGlyphScalar);
+  return m_packer.CanBePacked(glyphsCount, baseSize, baseSize);
 }
 
 bool GlyphIndex::HasAsyncRoutines() const
@@ -241,72 +259,35 @@ void GlyphIndex::UploadResources(ref_ptr<Texture> texture)
   if (pendingNodes.empty())
     return;
 
-  buffer_vector<size_t, 3> ranges;
-  buffer_vector<uint32_t, 2> maxHeights;
-  ranges.push_back(0);
-  uint32_t maxHeight = pendingNodes[0].first.SizeY();
-  for (size_t i = 1; i < pendingNodes.size(); ++i)
+  for (size_t i = 0; i < pendingNodes.size(); ++i)
   {
-    TPendingNode const & prevNode = pendingNodes[i - 1];
-    TPendingNode const & currentNode = pendingNodes[i];
-    if (ranges.size() < 2 && prevNode.first.minY() < currentNode.first.minY())
+    GlyphManager::Glyph & glyph = pendingNodes[i].second;
+    m2::RectU const rect = pendingNodes[i].first;
+    m2::PointU const zeroPoint = rect.LeftBottom();
+    if (glyph.m_image.m_width == 0 || glyph.m_image.m_height == 0 || rect.SizeX() == 0 || rect.SizeY() == 0)
     {
-      ranges.push_back(i);
-      maxHeights.push_back(maxHeight);
-      maxHeight = currentNode.first.SizeY();
-    }
-
-    maxHeight = max(maxHeight, currentNode.first.SizeY());
-  }
-  maxHeights.push_back(maxHeight);
-  ranges.push_back(pendingNodes.size());
-
-  ASSERT(maxHeights.size() < 3, ());
-  ASSERT(ranges.size() < 4, ());
-
-  for (size_t i = 1; i < ranges.size(); ++i)
-  {
-    size_t startIndex = ranges[i - 1];
-    size_t endIndex = ranges[i];
-    uint32_t height = maxHeights[i - 1];
-    uint32_t width = pendingNodes[endIndex - 1].first.maxX() - pendingNodes[startIndex].first.minX();
-    uint32_t byteCount = my::NextPowOf2(height * width);
-
-    if (byteCount == 0)
+      LOG(LWARNING, ("Glyph skipped", glyph.m_code));
       continue;
-
-    m2::PointU zeroPoint = pendingNodes[startIndex].first.LeftBottom();
-
-    SharedBufferManager::shared_buffer_ptr_t buffer = SharedBufferManager::instance().reserveSharedBuffer(byteCount);
-    uint8_t * dstMemory = SharedBufferManager::GetRawPointer(buffer);
-    view_t dstView = interleaved_view(width, height, (pixel_t *)dstMemory, width);
-    for (size_t node = startIndex; node < endIndex; ++node)
-    {
-      GlyphManager::Glyph & glyph = pendingNodes[node].second;
-      m2::RectU rect = pendingNodes[node].first;
-      if (rect.SizeX() == 0 || rect.SizeY() == 0)
-        continue;
-
-      rect.Offset(-zeroPoint);
-
-      uint32_t w = rect.SizeX();
-      uint32_t h = rect.SizeY();
-
-      ASSERT_EQUAL(glyph.m_image.m_width, w, ());
-      ASSERT_EQUAL(glyph.m_image.m_height, h, ());
-      ASSERT_GREATER_OR_EQUAL(height, h, ());
-
-      view_t dstSubView = subimage_view(dstView, rect.minX(), rect.minY(), w, h);
-      uint8_t * srcMemory = SharedBufferManager::GetRawPointer(glyph.m_image.m_data);
-      const_view_t srcView = interleaved_view(w, h, (const_pixel_t *)srcMemory, w);
-
-      copy_pixels(srcView, dstSubView);
-      glyph.m_image.Destroy();
     }
+    ASSERT_EQUAL(glyph.m_image.m_width, rect.SizeX(), ());
+    ASSERT_EQUAL(glyph.m_image.m_height, rect.SizeY(), ());
 
-    texture->UploadData(zeroPoint.x, zeroPoint.y, width, height, make_ref(dstMemory));
-    SharedBufferManager::instance().freeSharedBuffer(byteCount, buffer);
+    uint8_t * srcMemory = SharedBufferManager::GetRawPointer(glyph.m_image.m_data);
+    texture->UploadData(zeroPoint.x, zeroPoint.y, rect.SizeX(), rect.SizeY(), make_ref(srcMemory));
+    
+    glyph.m_image.Destroy();
   }
+}
+
+uint32_t GlyphIndex::GetAbsentGlyphsCount(strings::UniString const & text, int fixedHeight) const
+{
+  uint32_t count = 0;
+  for (strings::UniChar const & c : text)
+  {
+    if (m_index.find(GlyphKey(c, fixedHeight)) == m_index.end())
+      count++;
+  }
+  return count;
 }
 
 } // namespace dp

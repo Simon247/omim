@@ -1,6 +1,6 @@
-#include "map/api_mark_container.hpp"
 #include "map/bookmark_manager.hpp"
 #include "map/framework.hpp"
+#include "map/routing_mark.hpp"
 #include "map/user_mark.hpp"
 
 #include "platform/platform.hpp"
@@ -10,6 +10,7 @@
 
 #include "geometry/transformations.hpp"
 
+#include "base/macros.hpp"
 #include "base/stl_add.hpp"
 
 #include "std/algorithm.hpp"
@@ -19,10 +20,11 @@
 BookmarkManager::BookmarkManager(Framework & f)
   : m_framework(f)
 {
-  m_userMarkLayers.reserve(3);
+  m_userMarkLayers.reserve(4);
   m_userMarkLayers.push_back(new SearchUserMarkContainer(0.0 /* activePinDepth */, m_framework));
   m_userMarkLayers.push_back(new ApiUserMarkContainer(0.0 /* activePinDepth */, m_framework));
   m_userMarkLayers.push_back(new DebugUserMarkContainer(0.0 /* debugDepth */, m_framework));
+  m_userMarkLayers.push_back(new RouteUserMarkContainer(0.0 /* activePinDepth */, m_framework));
   UserMarkContainer::InitStaticMarks(FindUserMarksContainer(UserMarkType::SEARCH_MARK));
 }
 
@@ -48,8 +50,8 @@ void BookmarkManager::SaveState() const
 
 void BookmarkManager::LoadState()
 {
-  settings::Get(BOOKMARK_CATEGORY, m_lastCategoryUrl);
-  settings::Get(BOOKMARK_TYPE, m_lastType);
+  UNUSED_VALUE(settings::Get(BOOKMARK_CATEGORY, m_lastCategoryUrl));
+  UNUSED_VALUE(settings::Get(BOOKMARK_TYPE, m_lastType));
 }
 
 void BookmarkManager::ClearItems()
@@ -97,7 +99,9 @@ size_t BookmarkManager::AddBookmark(size_t categoryIndex, m2::PointD const & ptO
   BookmarkCategory * pCat = m_categories[categoryIndex];
 
   BookmarkCategory::Guard guard(*pCat);
-  static_cast<Bookmark *>(guard.m_controller.CreateUserMark(ptOrg))->SetData(bm);
+  Bookmark * bookmark = static_cast<Bookmark *>(guard.m_controller.CreateUserMark(ptOrg));
+  bookmark->SetData(bm);
+  bookmark->SetCreationAnimationShown(false);
   guard.m_controller.SetIsVisible(true);
   pCat->SaveToKMLFile();
 
@@ -149,7 +153,7 @@ size_t BookmarkManager::LastEditedBMCategory()
   }
 
   if (m_categories.empty())
-    m_categories.push_back(new BookmarkCategory(m_framework.GetStringsBundle().GetString("my_places"), m_framework));
+    CreateBmCategory(m_framework.GetStringsBundle().GetString("my_places"));
 
   return 0;
 }
@@ -229,6 +233,7 @@ UserMark const * BookmarkManager::FindNearestUserMark(TTouchRectHolder const & h
   for_each(m_categories.begin(), m_categories.end(), ref(finder));
   finder(FindUserMarksContainer(UserMarkType::API_MARK));
   finder(FindUserMarksContainer(UserMarkType::SEARCH_MARK));
+  finder(FindUserMarksContainer(UserMarkType::ROUTING_MARK));
 
   return finder.GetFindedMark();
 }

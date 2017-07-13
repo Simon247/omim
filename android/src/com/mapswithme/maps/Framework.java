@@ -1,14 +1,28 @@
 package com.mapswithme.maps;
 
+import android.graphics.Bitmap;
+import android.location.Location;
+import android.support.annotation.IntDef;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.annotation.Size;
 import android.support.annotation.UiThread;
 
+import com.mapswithme.maps.ads.LocalAdInfo;
+import com.mapswithme.maps.api.ParsedRoutingData;
+import com.mapswithme.maps.api.ParsedSearchRequest;
+import com.mapswithme.maps.api.ParsedUrlMwmRequest;
+import com.mapswithme.maps.api.RoutePoint;
 import com.mapswithme.maps.bookmarks.data.DistanceAndAzimut;
 import com.mapswithme.maps.bookmarks.data.MapObject;
+import com.mapswithme.maps.location.LocationHelper;
+import com.mapswithme.maps.routing.RouteMarkData;
+import com.mapswithme.maps.routing.RoutePointInfo;
 import com.mapswithme.maps.routing.RoutingInfo;
 import com.mapswithme.util.Constants;
+
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 
 /**
  * This class wraps android::Framework.cpp class
@@ -16,12 +30,45 @@ import com.mapswithme.util.Constants;
  */
 public class Framework
 {
-  public static final int MAP_STYLE_LIGHT = 0;
+  @Retention(RetentionPolicy.SOURCE)
+  @IntDef({MAP_STYLE_CLEAR, MAP_STYLE_DARK, MAP_STYLE_VEHICLE_CLEAR, MAP_STYLE_VEHICLE_DARK})
+
+  public @interface MapStyle {}
+
+  public static final int MAP_STYLE_CLEAR = 0;
   public static final int MAP_STYLE_DARK = 1;
-  public static final int MAP_STYLE_CLEAR = 2;
+  public static final int MAP_STYLE_VEHICLE_CLEAR = 3;
+  public static final int MAP_STYLE_VEHICLE_DARK = 4;
+
+  @Retention(RetentionPolicy.SOURCE)
+  @IntDef({ROUTER_TYPE_VEHICLE, ROUTER_TYPE_PEDESTRIAN, ROUTER_TYPE_BICYCLE, ROUTER_TYPE_TAXI})
+
+  public @interface RouterType {}
 
   public static final int ROUTER_TYPE_VEHICLE = 0;
   public static final int ROUTER_TYPE_PEDESTRIAN = 1;
+  public static final int ROUTER_TYPE_BICYCLE = 2;
+  public static final int ROUTER_TYPE_TAXI = 3;
+
+  @Retention(RetentionPolicy.SOURCE)
+  @IntDef({DO_AFTER_UPDATE_NOTHING, DO_AFTER_UPDATE_AUTO_UPDATE, DO_AFTER_UPDATE_ASK_FOR_UPDATE,
+           DO_AFTER_UPDATE_MIGRATE})
+  public @interface DoAfterUpdate {}
+
+  public static final int DO_AFTER_UPDATE_NOTHING = 0;
+  public static final int DO_AFTER_UPDATE_AUTO_UPDATE = 1;
+  public static final int DO_AFTER_UPDATE_ASK_FOR_UPDATE = 2;
+  public static final int DO_AFTER_UPDATE_MIGRATE = 3;
+
+  @Retention(RetentionPolicy.SOURCE)
+  @IntDef({LOCAL_ADS_EVENT_SHOW_POINT, LOCAL_ADS_EVENT_OPEN_INFO, LOCAL_ADS_EVENT_CLICKED_PHONE,
+           LOCAL_ADS_EVENT_CLICKED_WEBSITE})
+  public @interface LocalAdsEventType {}
+
+  public static final int LOCAL_ADS_EVENT_SHOW_POINT = 0;
+  public static final int LOCAL_ADS_EVENT_OPEN_INFO = 1;
+  public static final int LOCAL_ADS_EVENT_CLICKED_PHONE = 2;
+  public static final int LOCAL_ADS_EVENT_CLICKED_WEBSITE = 3;
 
   @SuppressWarnings("unused")
   public interface MapObjectListener
@@ -49,6 +96,13 @@ public class Framework
     public boolean buildings;
   }
 
+  public static class RouteAltitudeLimits
+  {
+    public int minRouteAltitude;
+    public int maxRouteAltitude;
+    public boolean isMetricUnits;
+  }
+
   // this class is just bridge between Java and C++ worlds, we must not create it
   private Framework() {}
 
@@ -57,9 +111,46 @@ public class Framework
     return nativeGetGe0Url(lat, lon, zoomLevel, name).replaceFirst(Constants.Url.GE0_PREFIX, Constants.Url.HTTP_GE0_PREFIX);
   }
 
+  /**
+   * Generates Bitmap with route altitude image chart taking into account current map style.
+   * @param width is width of the image.
+   * @param height is height of the image.
+   * @return Bitmap if there's pedestrian or bicycle route and null otherwise.
+   */
+  @Nullable
+  public static Bitmap generateRouteAltitudeChart(int width, int height,
+                                                  @NonNull RouteAltitudeLimits limits)
+  {
+    if (width <= 0 || height <= 0)
+      return null;
+
+    final int[] altitudeChartBits = Framework.nativeGenerateRouteAltitudeChartBits(width, height,
+                                                                                   limits);
+    if (altitudeChartBits == null)
+      return null;
+
+    return Bitmap.createBitmap(altitudeChartBits, width, height, Bitmap.Config.ARGB_8888);
+  }
+
+  public static void logLocalAdsEvent(@Framework.LocalAdsEventType int type,
+                                      @NonNull MapObject mapObject)
+  {
+    LocalAdInfo info = mapObject.getLocalAdInfo();
+    if (info == null || !info.isCustomer())
+      return;
+
+    Location location = LocationHelper.INSTANCE.getLastKnownLocation();
+    double lat = location != null ? location.getLatitude() : 0;
+    double lon = location != null ? location.getLongitude() : 0;
+    int accuracy = location != null ? (int) location.getAccuracy() : 0;
+    nativeLogLocalAdsEvent(type, lat, lon, accuracy);
+  }
+
   public static native void nativeShowTrackRect(int category, int track);
 
   public static native int nativeGetDrawScale();
+  
+  public static native int nativeUpdateUserViewportChanged();
 
   @Size(2)
   public static native double[] nativeGetScreenRectCenter();
@@ -88,6 +179,14 @@ public class Framework
   @UiThread
   public static native String nativeGetOutdatedCountriesString();
 
+  @UiThread
+  @NonNull
+  public static native String[] nativeGetOutdatedCountries();
+
+  @UiThread
+  @DoAfterUpdate
+  public static native int nativeToDoAfterUpdate();
+
   public static native boolean nativeIsDataVersionChanged();
 
   public static native void nativeUpdateSavedDataVersion();
@@ -95,6 +194,10 @@ public class Framework
   public static native long nativeGetDataVersion();
 
   public static native void nativeClearApiPoints();
+  @ParsedUrlMwmRequest.ParsingResult
+  public static native int nativeParseAndSetApiUrl(String url);
+  public static native ParsedRoutingData nativeGetParsedRoutingData();
+  public static native ParsedSearchRequest nativeGetParsedSearchRequest();
 
   public static native void nativeDeactivatePopup();
 
@@ -121,13 +224,19 @@ public class Framework
 
   public static native void nativeCloseRouting();
 
-  public static native void nativeBuildRoute(double startLat, double startLon, double finishLat, double finishLon);
+  public static native void nativeBuildRoute();
+
+  public static native void nativeRemoveRoute();
 
   public static native void nativeFollowRoute();
 
   public static native void nativeDisableFollowing();
 
+  @Nullable
   public static native RoutingInfo nativeGetRouteFollowingInfo();
+
+  @Nullable
+  public static native final int[] nativeGenerateRouteAltitudeChartBits(int width, int height, RouteAltitudeLimits routeAltitudeLimits);
 
   // When an end user is going to a turn he gets sound turn instructions.
   // If C++ part wants the client to pronounce an instruction nativeGenerateTurnNotifications returns
@@ -135,6 +244,7 @@ public class Framework
   // For example if C++ part wants the client to pronounce "Make a right turn." this method returns
   // an array with one string "Make a right turn.". The next call of the method returns nothing.
   // nativeGenerateTurnNotifications shall be called by the client when a new position is available.
+  @Nullable
   public static native String[] nativeGenerateTurnNotifications();
 
   public static native void nativeSetRoutingListener(RoutingListener listener);
@@ -143,9 +253,10 @@ public class Framework
 
   public static native void nativeShowCountry(String countryId, boolean zoomToDownloadButton);
 
-  public static native double[] nativePredictLocation(double lat, double lon, double accuracy, double bearing, double speed, double elapsedSeconds);
-
   public static native void nativeSetMapStyle(int mapStyle);
+
+  @MapStyle
+  public static native int nativeGetMapStyle();
 
   /**
    * This method allows to set new map style without immediate applying. It can be used before
@@ -154,20 +265,28 @@ public class Framework
    */
   public static native void nativeMarkMapStyle(int mapStyle);
 
-  public static native void nativeSetRouter(int routerType);
-
+  public static native void nativeSetRouter(@RouterType int routerType);
+  @RouterType
   public static native int nativeGetRouter();
-
+  @RouterType
   public static native int nativeGetLastUsedRouter();
+  @RouterType
+  public static native int nativeGetBestRouter(double srcLat, double srcLon,
+                                               double dstLat, double dstLon);
 
-  /**
-   * @return {@link Framework#ROUTER_TYPE_VEHICLE} or {@link Framework#ROUTER_TYPE_PEDESTRIAN}
-   */
-  public static native int nativeGetBestRouter(double srcLat, double srcLon, double dstLat, double dstLon);
+  public static native void nativeAddRoutePoint(String name,
+                                                @RoutePointInfo.RouteMarkType int markType,
+                                                int intermediateIndex, boolean isMyPosition,
+                                                double lat, double lon);
 
-  public static native void nativeSetRouteStartPoint(double lat, double lon, boolean valid);
+  public static native void nativeRemoveRoutePoint(@RoutePointInfo.RouteMarkType int markType,
+                                                   int intermediateIndex);
 
-  public static native void nativeSetRouteEndPoint(double lat, double lon, boolean valid);
+  public static native void nativeRemoveIntermediateRoutePoints();
+
+  public static native boolean nativeCouldAddIntermediatePoint();
+  @NonNull
+  public static native RouteMarkData[] nativeGetRoutePoints();
 
   /**
    * Registers all maps(.mwms). Adds them to the models, generates indexes and does all necessary stuff.
@@ -189,6 +308,14 @@ public class Framework
 
   public static native void nativeSet3dMode(boolean allow3d, boolean allow3dBuildings);
 
+  public static native boolean nativeGetAutoZoomEnabled();
+
+  public static native void nativeSetAutoZoomEnabled(boolean enabled);
+
+  public static native boolean nativeGetSimplifiedTrafficColorsEnabled();
+
+  public static native void nativeSetSimplifiedTrafficColorsEnabled(boolean enabled);
+
   @NonNull
   public static native MapObject nativeDeleteBookmarkFromMapObject();
 
@@ -197,10 +324,23 @@ public class Framework
 
   public static native void nativeZoomToPoint(double lat, double lon, int zoom, boolean animate);
 
-
-  public static native void nativeTurnChoosePositionMode(boolean turnedOn);
-
+  /**
+   * @param isBusiness selection area will be bounded by building borders, if its true(eg. true for businesses in buildings).
+   * @param applyPosition if true, map'll be animated to currently selected object.
+   */
+  public static native void nativeTurnOnChoosePositionMode(boolean isBusiness, boolean applyPosition);
+  public static native void nativeTurnOffChoosePositionMode();
+  public static native boolean nativeIsInChoosePositionMode();
   public static native boolean nativeIsDownloadedMapAtScreenCenter();
-
   public static native String nativeGetActiveObjectFormattedCuisine();
+
+  public static native void nativeSetVisibleRect(int left, int top, int right, int bottom);
+
+  // Navigation.
+  public static native boolean nativeIsRouteFinished();
+
+  private static native void nativeLogLocalAdsEvent(@LocalAdsEventType int eventType,
+                                                   double lat, double lon, int accuracy);
+
+  public static native void nativeRunFirstLaunchAnimation();
 }

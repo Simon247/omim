@@ -17,9 +17,7 @@ using platform::LocalCountryFile;
 //////////////////////////////////////////////////////////////////////////////////
 
 MwmValue::MwmValue(LocalCountryFile const & localFile)
-    : m_cont(platform::GetCountryReader(localFile, MapOptions::Map)),
-      m_file(localFile),
-      m_table(0)
+  : m_cont(platform::GetCountryReader(localFile, MapOptions::Map)), m_file(localFile)
 {
   m_factory.Load(m_cont);
 }
@@ -30,14 +28,15 @@ void MwmValue::SetTable(MwmInfoEx & info)
   if (version < version::Format::v5)
     return;
 
-  if (!info.m_table)
+  m_table = info.m_table.lock();
+  if (!m_table)
   {
     if (version == version::Format::v5)
-      info.m_table = feature::FeaturesOffsetsTable::CreateIfNotExistsAndLoad(m_file, m_cont);
+      m_table = feature::FeaturesOffsetsTable::CreateIfNotExistsAndLoad(m_file, m_cont);
     else
-      info.m_table = feature::FeaturesOffsetsTable::Load(m_cont);
+      m_table = feature::FeaturesOffsetsTable::Load(m_cont);
+    info.m_table = m_table;
   }
-  m_table = info.m_table.get();
 }
 
 //////////////////////////////////////////////////////////////////////////////////
@@ -52,13 +51,16 @@ unique_ptr<MwmInfo> Index::CreateInfo(platform::LocalCountryFile const & localFi
   if (!h.IsMWMSuitable())
     return nullptr;
 
-  unique_ptr<MwmInfoEx> info(new MwmInfoEx());
+  auto info = make_unique<MwmInfoEx>();
   info->m_limitRect = h.GetBounds();
 
   pair<int, int> const scaleR = h.GetScaleRange();
   info->m_minScale = static_cast<uint8_t>(scaleR.first);
   info->m_maxScale = static_cast<uint8_t>(scaleR.second);
   info->m_version = value.GetMwmVersion();
+  // Copying to drop the const qualifier.
+  feature::RegionData regionData(value.GetRegionData());
+  info->m_data = regionData;
 
   return unique_ptr<MwmInfo>(move(info));
 }
@@ -84,38 +86,61 @@ bool Index::DeregisterMap(CountryFile const & countryFile) { return Deregister(c
 // Index::FeaturesLoaderGuard implementation
 //////////////////////////////////////////////////////////////////////////////////
 
-Index::FeaturesLoaderGuard::FeaturesLoaderGuard(Index const & parent, MwmId const & id)
-    : m_handle(parent.GetMwmHandleById(id)),
-      /// @note This guard is suitable when mwm is loaded
-      m_vector(m_handle.GetValue<MwmValue>()->m_cont,
-               m_handle.GetValue<MwmValue>()->GetHeader(),
-               m_handle.GetValue<MwmValue>()->m_table)
+Index::FeaturesLoaderGuard::FeaturesLoaderGuard(Index const & index, MwmId const & id)
+  : m_handle(index.GetMwmHandleById(id))
 {
+  if (!m_handle.IsAlive())
+    return;
+
+  auto const & value = *m_handle.GetValue<MwmValue>();
+  m_vector = make_unique<FeaturesVector>(value.m_cont, value.GetHeader(), value.m_table.get());
 }
 
 string Index::FeaturesLoaderGuard::GetCountryFileName() const
 {
   if (!m_handle.IsAlive())
     return string();
+
   return m_handle.GetValue<MwmValue>()->GetCountryFileName();
 }
 
 bool Index::FeaturesLoaderGuard::IsWorld() const
 {
+  if (!m_handle.IsAlive())
+    return false;
+
   return m_handle.GetValue<MwmValue>()->GetHeader().GetType() == feature::DataHeader::world;
 }
 
-void Index::FeaturesLoaderGuard::GetFeatureByIndex(uint32_t index, FeatureType & ft) const
+bool Index::FeaturesLoaderGuard::GetFeatureByIndex(uint32_t index, FeatureType & ft) const
 {
+  if (!m_handle.IsAlive())
+    return false;
+
   MwmId const & id = m_handle.GetId();
   ASSERT_NOT_EQUAL(osm::Editor::FeatureStatus::Deleted, m_editor.GetFeatureStatus(id, index),
                    ("Deleted feature was cached. It should not be here. Please review your code."));
-  if (!m_editor.Instance().GetEditedFeature(id, index, ft))
-    GetOriginalFeatureByIndex(index, ft);
+  if (m_editor.Instance().GetEditedFeature(id, index, ft))
+    return true;
+  return GetOriginalFeatureByIndex(index, ft);
 }
 
-void Index::FeaturesLoaderGuard::GetOriginalFeatureByIndex(uint32_t index, FeatureType & ft) const
+bool Index::FeaturesLoaderGuard::GetOriginalFeatureByIndex(uint32_t index, FeatureType & ft) const
 {
-  m_vector.GetByIndex(index, ft);
+  if (!m_handle.IsAlive())
+    return false;
+
+  ASSERT(m_vector != nullptr, ());
+  m_vector->GetByIndex(index, ft);
   ft.SetID(FeatureID(m_handle.GetId(), index));
+  return true;
+}
+
+size_t Index::FeaturesLoaderGuard::GetNumFeatures() const
+{
+  if (!m_handle.IsAlive())
+    return 0;
+
+  ASSERT(m_vector.get(), ());
+  return m_vector->GetNumFeatures();
 }

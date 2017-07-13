@@ -1,6 +1,6 @@
 #include "indexer/feature_visibility.hpp"
 #include "indexer/classificator.hpp"
-#include "indexer/feature.hpp"
+#include "indexer/drawing_rules.hpp"
 #include "indexer/scales.hpp"
 
 #include "base/assert.hpp"
@@ -114,6 +114,17 @@ void GetDrawRule(vector<uint32_t> const & types, int level, int geoType,
     (void)c.ProcessObjects(t, doRules);
 }
 
+void FilterRulesByRuntimeSelector(FeatureType const & f, int zoomLevel, drule::KeysT & keys)
+{
+  keys.erase_if([&f, zoomLevel](drule::Key const & key)->bool
+  {
+    drule::BaseRule const * const rule = drule::rules().Find(key);
+    if (rule == nullptr)
+      return true;
+    return !rule->TestFeature(f, zoomLevel);
+  });
+}
+
 namespace
 {
   class IsDrawableChecker
@@ -208,23 +219,39 @@ namespace
 
   /// Add here all exception classificator types: needed for algorithms,
   /// but don't have drawing rules.
-  bool TypeAlwaysExists(uint32_t t, EGeomType g = GEOM_UNDEFINED)
+  /// See also ftypes_matcher.cpp, IsInvisibleIndexedChecker.
+  bool TypeAlwaysExists(uint32_t type, EGeomType g = GEOM_UNDEFINED)
   {
-    static const uint32_t s1 = classif().GetTypeByPath({ "junction", "roundabout" });
-    static const uint32_t s2 = classif().GetTypeByPath({ "hwtag" });
+    static const uint32_t roundabout = classif().GetTypeByPath({ "junction", "roundabout" });
+    static const uint32_t hwtag = classif().GetTypeByPath({ "hwtag" });
+    static const uint32_t psurface = classif().GetTypeByPath({ "psurface" });
+    static const uint32_t wheelchair = classif().GetTypeByPath({ "wheelchair" });
+    static const uint32_t sponsored = classif().GetTypeByPath({ "sponsored" });
+    static const uint32_t internet = classif().GetTypeByPath({ "internet_access" });
+
+    // Caching type length to exclude generic [wheelchair].
+    uint8_t const typeLength = ftype::GetLevel(type);
 
     if (g == GEOM_LINE || g == GEOM_UNDEFINED)
     {
-      if (s1 == t)
+      if (roundabout == type)
         return true;
 
-      if (HasRoutingExceptionType(t))
+      if (HasRoutingExceptionType(type))
         return true;
 
-      ftype::TruncValue(t, 1);
-      if (s2 == t)
+      ftype::TruncValue(type, 1);
+      if (hwtag == type || psurface == type)
         return true;
     }
+
+    // We're okay with the type being already truncated above.
+    ftype::TruncValue(type, 1);
+    if (wheelchair == type && typeLength == 2)
+      return true;
+
+    if (sponsored == type || internet == type)
+      return true;
 
     return false;
   }

@@ -1,9 +1,12 @@
 #include "testing/testing.hpp"
+#include "helpers.hpp"
 
 #include "indexer/classificator_loader.hpp"
 #include "indexer/drawing_rules.hpp"
 #include "indexer/drules_include.hpp"
 #include "indexer/map_style_reader.hpp"
+
+#include "platform/platform.hpp"
 
 #include "base/logging.hpp"
 
@@ -14,6 +17,19 @@
 #include "std/set.hpp"
 #include "std/string.hpp"
 #include "std/vector.hpp"
+
+namespace
+{
+void UnitTestInitPlatform()
+{
+  Platform & pl = GetPlatform();
+  CommandLineOptions const & options = GetTestingOptions();
+  if (options.m_dataPath)
+    pl.SetWritableDirForTests(options.m_dataPath);
+  if (options.m_resourcePath)
+    pl.SetResourceDir(options.m_resourcePath);
+}
+}
 
 namespace
 {
@@ -44,7 +60,7 @@ set<string> GetSymbolsSetFromDrawingRule()
   drule::rules().ForEachRule([&symbols](int, int, int, drule::BaseRule const * rule)
   {
     SymbolRuleProto const * const symbol = rule->GetSymbol();
-    if (nullptr != symbol && symbol->has_name())
+    if (nullptr != symbol && !symbol->name().empty())
       symbols.insert(symbol->name());
   });
   return symbols;
@@ -64,26 +80,21 @@ set<string> GetSymbolsSetFromResourcesFile(string const & density)
 
 UNIT_TEST(Test_SymbolsConsistency)
 {
+  UnitTestInitPlatform();
+
   // Tests that all symbols specified in drawing rules have corresponding symbols in resources
 
   bool res = true;
 
-  vector<string> densities = { "ldpi", "mdpi", "hdpi", "xhdpi", "xxhdpi", "6plus" };
+  string const densities[] = { "mdpi", "hdpi", "xhdpi", "xxhdpi", "6plus" };
 
-  for (size_t s = 0; s < MapStyleCount; ++s)
+  styles::RunForEveryMapStyle([&](MapStyle mapStyle)
   {
-    MapStyle const mapStyle = static_cast<MapStyle>(s);
-    if (mapStyle == MapStyleMerged)
-      continue;
-
-    GetStyleReader().SetCurrentStyle(mapStyle);
-    classificator::Load();
-
     set<string> const drawingRuleSymbols = GetSymbolsSetFromDrawingRule();
 
-    for (size_t d = 0; d < densities.size(); ++d)
+    for (string const & density : densities)
     {
-      set<string> const resourceStyles = GetSymbolsSetFromResourcesFile(densities[d]);
+      set<string> const resourceStyles = GetSymbolsSetFromResourcesFile(density);
 
       vector<string> missed;
       set_difference(drawingRuleSymbols.begin(), drawingRuleSymbols.end(),
@@ -94,11 +105,11 @@ UNIT_TEST(Test_SymbolsConsistency)
       {
         // We are interested in all set of bugs, therefore we do not stop test here but
         // continue it just keeping in res that test failed.
-        LOG(LINFO, ("Symbols mismatch: style", mapStyle, ", density", densities[d], ", missed", missed));
+        LOG(LINFO, ("Symbols mismatch: style", mapStyle, ", density", density, ", missed", missed));
         res = false;
       }
     }
-  }
+  });
 
   TEST(res, ());
 }

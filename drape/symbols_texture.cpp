@@ -10,13 +10,15 @@
 
 #include "base/string_utils.hpp"
 
+#ifdef DEBUG
+#include "3party/glm/glm/gtx/bit.hpp"
+#endif
+
 namespace dp
 {
 
 namespace
 {
-
-string const SymbolsTextureName = "symbols";
 
 using TDefinitionInserter = function<void(string const &, m2::RectF const &)>;
 using TSymbolsLoadingCompletion = function<void(unsigned char *, uint32_t, uint32_t)>;
@@ -110,8 +112,8 @@ private:
   m2::RectF m_rect;
 };
 
-void LoadSymbols(string const & skinPathName, bool convertToUV,
-                 TDefinitionInserter const & definitionInserter,
+void LoadSymbols(std::string const & skinPathName, std::string const & textureName,
+                 bool convertToUV, TDefinitionInserter const & definitionInserter,
                  TSymbolsLoadingCompletion const & completionHandler,
                  TSymbolsLoadingFailure const & failureHandler)
 {
@@ -127,7 +129,7 @@ void LoadSymbols(string const & skinPathName, bool convertToUV,
     DefinitionLoader loader(definitionInserter, convertToUV);
 
     {
-      ReaderPtr<Reader> reader = GetStyleReader().GetResourceReader(SymbolsTextureName + ".sdf", skinPathName);
+      ReaderPtr<Reader> reader = GetStyleReader().GetResourceReader(textureName + ".sdf", skinPathName);
       ReaderSource<ReaderPtr<Reader> > source(reader);
       if (!ParseXML(source, loader))
       {
@@ -140,8 +142,8 @@ void LoadSymbols(string const & skinPathName, bool convertToUV,
     }
 
     {
-      ReaderPtr<Reader> reader = GetStyleReader().GetResourceReader(SymbolsTextureName + ".png", skinPathName);
-      size_t const size = reader.Size();
+      ReaderPtr<Reader> reader = GetStyleReader().GetResourceReader(textureName + ".png", skinPathName);
+      size_t const size = static_cast<size_t>(reader.Size());
       rawData.resize(size);
       reader.Read(0, &rawData[0], size);
     }
@@ -153,10 +155,12 @@ void LoadSymbols(string const & skinPathName, bool convertToUV,
   }
 
   int w, h, bpp;
-  unsigned char * data = stbi_png_load_from_memory(&rawData[0], rawData.size(), &w, &h, &bpp, 0);
+  unsigned char * data = stbi_load_from_memory(&rawData[0], static_cast<int>(rawData.size()), &w, &h, &bpp, 0);
   ASSERT_EQUAL(bpp, 4, ("Incorrect symbols texture format"));
+  ASSERT(glm::isPowerOfTwo(w), (w));
+  ASSERT(glm::isPowerOfTwo(h), (h));
 
-  if (width == w && height == h)
+  if (width == static_cast<uint32_t>(w) && height == static_cast<uint32_t>(h))
   {
     completionHandler(data, width, height);
   }
@@ -195,16 +199,18 @@ Texture::ResourceType SymbolsTexture::SymbolInfo::GetType() const
   return Symbol;
 }
 
-SymbolsTexture::SymbolsTexture(string const & skinPathName, ref_ptr<HWTextureAllocator> allocator)
+SymbolsTexture::SymbolsTexture(std::string const & skinPathName, std::string const & textureName,
+                               ref_ptr<HWTextureAllocator> allocator)
+  : m_name(textureName)
 {
   Load(skinPathName, allocator);
 }
 
-void SymbolsTexture::Load(string const & skinPathName, ref_ptr<HWTextureAllocator> allocator)
+void SymbolsTexture::Load(std::string const & skinPathName, ref_ptr<HWTextureAllocator> allocator)
 {
   auto definitionInserter = [this](string const & name, m2::RectF const & rect)
   {
-    m_definition.insert(make_pair(name, SymbolsTexture::SymbolInfo(rect)));
+    m_definition.insert(std::make_pair(name, SymbolsTexture::SymbolInfo(rect)));
   };
 
   auto completionHandler = [this, &allocator](unsigned char * data, uint32_t width, uint32_t height)
@@ -224,7 +230,8 @@ void SymbolsTexture::Load(string const & skinPathName, ref_ptr<HWTextureAllocato
     Fail();
   };
 
-  LoadSymbols(skinPathName, true /* convertToUV */, definitionInserter, completionHandler, failureHandler);
+  LoadSymbols(skinPathName, m_name, true /* convertToUV */, definitionInserter,
+              completionHandler, failureHandler);
 }
 
 void SymbolsTexture::Invalidate(string const & skinPathName, ref_ptr<HWTextureAllocator> allocator)
@@ -261,8 +268,14 @@ void SymbolsTexture::Fail()
   Create(p, make_ref(&alfaTexture));
 }
 
-bool SymbolsTexture::DecodeToMemory(string const & skinPathName, vector<uint8_t> & symbolsSkin,
-                                    map<string, m2::RectU> & symbolsIndex,
+bool SymbolsTexture::IsSymbolContained(std::string const & symbolName) const
+{
+  return m_definition.find(symbolName) != m_definition.end();
+}
+
+bool SymbolsTexture::DecodeToMemory(std::string const & skinPathName, std::string const & textureName,
+                                    vector<uint8_t> & symbolsSkin,
+                                    std::map<string, m2::RectU> & symbolsIndex,
                                     uint32_t & skinWidth, uint32_t & skinHeight)
 {
   auto definitionInserter = [&symbolsIndex](string const & name, m2::RectF const & rect)
@@ -288,7 +301,8 @@ bool SymbolsTexture::DecodeToMemory(string const & skinPathName, vector<uint8_t>
     result = false;
   };
 
-  LoadSymbols(skinPathName, false /* convertToUV */, definitionInserter, completionHandler, failureHandler);
+  LoadSymbols(skinPathName, textureName, false /* convertToUV */,
+              definitionInserter, completionHandler, failureHandler);
   return result;
 }
 

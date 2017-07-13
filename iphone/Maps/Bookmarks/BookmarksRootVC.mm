@@ -1,14 +1,17 @@
 #import "BookmarksRootVC.h"
 #import "BookmarksVC.h"
-#import "Common.h"
+#import "MWMCommon.h"
 #import "Statistics.h"
-#import "UIColor+MapsMeColor.h"
 #import "UIImageView+Coloring.h"
 
 #include "Framework.h"
 #include "platform/platform.hpp"
 
 #define TEXTFIELD_TAG 999
+
+extern NSString * const kBookmarkCategoryDeletedNotification =
+    @"BookmarkCategoryDeletedNotification";
+
 
 @implementation BookmarksRootVC
 
@@ -26,11 +29,6 @@
                                                object:nil];
   }
   return self;
-}
-
-- (BOOL)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)interfaceOrientation
-{
-  return YES;
 }
 
 // Used to display add bookmarks hint
@@ -58,7 +56,7 @@
     label.textColor = [UIColor blackPrimaryText];
     [m_hint addSubview:label];
   }
-  UILabel * label = [m_hint.subviews objectAtIndex:0];
+  UILabel * label = m_hint.subviews.firstObject;
   label.bounds = CGRectInset(rect, offset, offset);
   [label sizeToIntegralFit];
   m_hint.bounds = CGRectMake(0, 0, rect.size.width, label.bounds.size.height + 2 * offset);
@@ -95,8 +93,6 @@
     [Statistics logEvent:kStatEventName(kStatBookmarks, kStatToggleVisibility)
                      withParameters:@{kStatValue : visible ? kStatVisible : kStatHidden}];
     cell.imageView.image = [UIImage imageNamed:(visible ? @"ic_show" : @"ic_hide")];
-    if (isIOS7)
-      [cell.imageView makeImageAlwaysTemplate];
     cell.imageView.mwm_coloring = visible ? MWMImageColoringBlue : MWMImageColoringBlack;
     {
       BookmarkCategory::Guard guard(*cat);
@@ -130,8 +126,6 @@
     BOOL const isVisible = cat->IsVisible();
     cell.imageView.image = [UIImage imageNamed:(isVisible ? @"ic_show" : @"ic_hide")];
     cell.imageView.mwm_coloring = isVisible ? MWMImageColoringBlue : MWMImageColoringBlack;
-    if (isIOS7)
-      [cell.imageView makeImageAlwaysTemplate];
     cell.detailTextLabel.text = [NSString stringWithFormat:@"%ld", cat->GetUserMarkCount() + cat->GetTracksCount()];
   }
   cell.backgroundColor = [UIColor white];
@@ -139,9 +133,15 @@
   return cell;
 }
 
-- (void)willAnimateRotationToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation duration:(NSTimeInterval)duration
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
 {
-  [self.tableView reloadRowsAtIndexPaths:self.tableView.indexPathsForVisibleRows withRowAnimation:UITableViewRowAnimationFade];
+  [coordinator
+      animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+        NSArray<NSIndexPath *> * ips = self.tableView.indexPathsForVisibleRows;
+        [self.tableView reloadRowsAtIndexPaths:ips withRowAnimation:UITableViewRowAnimationFade];
+      }
+                      completion:nil];
 }
 
 - (NSString *)truncateString:(NSString *)string toWidth:(CGFloat)width withFont:(UIFont *)font
@@ -170,7 +170,8 @@
     {
       NSString * txt = f.text;
       // Update edited category name
-      if (txt.length && ![txt isEqualToString:cell.textLabel.text])
+      NSString * cellLabel = cell.textLabel.text;
+      if (txt.length && ![txt isEqualToString:cellLabel])
       {
         cell.textLabel.text = txt;
         // Rename category
@@ -214,7 +215,7 @@
     f.font = [cell.textLabel.font fontWithSize:[cell.textLabel.font pointSize]];
     f.tag = TEXTFIELD_TAG;
     f.delegate = self;
-    f.autocapitalizationType = UITextAutocapitalizationTypeWords;
+    f.autocapitalizationType = UITextAutocapitalizationTypeSentences;
     cell.textLabel.hidden = YES;
     cell.detailTextLabel.hidden = YES;
     cell.accessoryType = UITableViewCellAccessoryNone;
@@ -238,10 +239,10 @@
   if (editingStyle == UITableViewCellEditingStyleDelete)
   {
     [Statistics logEvent:kStatEventName(kStatPlacePage, kStatRemove)];
-    [[NSNotificationCenter defaultCenter] postNotificationName:BOOKMARK_CATEGORY_DELETED_NOTIFICATION object:@(indexPath.row)];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kBookmarkCategoryDeletedNotification object:@(indexPath.row)];
     Framework & f = GetFramework();
     f.DeleteBmCategory(indexPath.row);
-    [self.tableView deleteRowsAtIndexPaths:[NSArray arrayWithObject:indexPath] withRowAnimation:UITableViewRowAnimationFade];
+    [self.tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
     // Disable edit mode if no categories are left
     if (!f.GetBmCategoriesCount())
     {

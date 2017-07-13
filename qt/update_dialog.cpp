@@ -59,17 +59,6 @@ bool DeleteNotUploadedEditsConfirmation()
 
 namespace qt
 {
-  /// adds custom sorting for "Size" column
-  class QTreeWidgetItemWithCustomSorting : public QTreeWidgetItem
-  {
-  public:
-    virtual bool operator<(QTreeWidgetItem const & other) const
-    {
-      return data(KColumnIndexSize, Qt::UserRole).toULongLong() < other.data(KColumnIndexSize, Qt::UserRole).toULongLong();
-    }
-  };
-
-
   UpdateDialog::UpdateDialog(QWidget * parent, Framework & framework)
     : QDialog(parent, Qt::WindowTitleHint | Qt::WindowSystemMenuHint),
       m_framework(framework),
@@ -402,7 +391,7 @@ namespace qt
     m_tree->setSortingEnabled(false);
     m_tree->clear();
 
-    TCountryId const rootId = m_framework.Storage().GetRootId();
+    TCountryId const rootId = m_framework.GetStorage().GetRootId();
     FillTreeImpl(nullptr /* parent */, rootId, filter);
 
     // Expand the root.
@@ -411,13 +400,8 @@ namespace qt
 
     m_tree->sortByColumn(KColumnIndexCountry, Qt::AscendingOrder);
     m_tree->setSortingEnabled(true);
-#if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
-    m_tree->header()->setResizeMode(KColumnIndexCountry, QHeaderView::ResizeToContents);
-    m_tree->header()->setResizeMode(KColumnIndexStatus, QHeaderView::ResizeToContents);
-#else
     m_tree->header()->setSectionResizeMode(KColumnIndexCountry, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(KColumnIndexStatus, QHeaderView::ResizeToContents);
-#endif
   }
 
   void UpdateDialog::OnCountryChanged(TCountryId const & countryId)

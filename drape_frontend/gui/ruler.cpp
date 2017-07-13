@@ -1,13 +1,13 @@
-#include "drape_gui.hpp"
-#include "gui_text.hpp"
-#include "ruler.hpp"
-#include "ruler_helper.hpp"
+#include "drape_frontend/gui/ruler.hpp"
 
 #include "drape_frontend/animation/show_hide_animation.hpp"
+#include "drape_frontend/gui/drape_gui.hpp"
+#include "drape_frontend/gui/gui_text.hpp"
+#include "drape_frontend/gui/ruler_helper.hpp"
+#include "drape_frontend/shader_def.hpp"
 
 #include "drape/glsl_func.hpp"
 #include "drape/glsl_types.hpp"
-#include "drape/shader_def.hpp"
 
 #include "std/bind.hpp"
 
@@ -232,7 +232,7 @@ void Ruler::DrawRuler(m2::PointF & size, ShapeControl & control, ref_ptr<dp::Tex
 void Ruler::DrawText(m2::PointF & size, ShapeControl & control, ref_ptr<dp::TextureManager> tex, bool isAppearing) const
 {
   string alphabet;
-  size_t maxTextLength;
+  uint32_t maxTextLength;
   RulerHelper & helper = DrapeGui::GetRulerHelper();
   helper.GetTextInitInfo(alphabet, maxTextLength);
 

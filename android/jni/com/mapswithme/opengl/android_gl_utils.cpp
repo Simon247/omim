@@ -1,7 +1,8 @@
 #include "android_gl_utils.hpp"
 
-#include "../../../../../base/logging.hpp"
-#include "../../../../../base/string_utils.hpp"
+#include "base/logging.hpp"
+#include "base/src_point.hpp"
+#include "base/string_utils.hpp"
 
 namespace android
 {
@@ -48,7 +49,7 @@ int ConfigComparator::configAlphaSize(EGLConfig const & config) const
 namespace
 {
 
-string GetEglError(EGLint error)
+std::string GetEglError(EGLint error)
 {
   switch (error)
   {

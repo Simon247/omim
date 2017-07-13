@@ -21,7 +21,9 @@ enum class Format
   v6,      // October 2015 (offsets vector is in mwm now).
   v7,      // November 2015 (supply different search index formats).
   v8,      // February 2016 (long strings in metadata; store seconds since epoch in MwmVersion).
-  lastFormat = v8
+           // December 2016 (index graph section was added in version 161206, between v8 and v9).
+  v9,      // April 2017 (OSRM sections are deleted and replaced by cross mwm section).
+  lastFormat = v9
 };
 
 string DebugPrint(Format f);
@@ -36,6 +38,7 @@ public:
 
   void SetFormat(Format format) { m_format = format; }
   void SetSecondsSinceEpoch(uint64_t secondsSinceEpoch) { m_secondsSinceEpoch = secondsSinceEpoch; }
+  bool IsEditableMap() const;
 
 private:
   /// Data layout format in mwm file.

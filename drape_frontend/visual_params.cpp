@@ -6,13 +6,14 @@
 
 #include "geometry/mercator.hpp"
 
-#include "std/limits.hpp"
+#include "indexer/scales.hpp"
+
 #include "std/algorithm.hpp"
+#include "std/limits.hpp"
+#include "std/utility.hpp"
 
 namespace df
 {
-
-uint32_t const YotaDevice = 0x1;
 
 namespace
 {
@@ -32,13 +33,16 @@ static bool g_isInited = false;
 #define ASSERT_INITED
 #endif
 
+double const VisualParams::kMdpiScale = 1.0;
+double const VisualParams::kHdpiScale = 1.5;
+double const VisualParams::kXhdpiScale = 2.0;
+double const VisualParams::k6plusScale = 2.4;
+double const VisualParams::kXxhdpiScale = 3.0;
 
-void VisualParams::Init(double vs, uint32_t tileSize, vector<uint32_t> const & additionalOptions)
+void VisualParams::Init(double vs, uint32_t tileSize)
 {
   g_VizParams.m_tileSize = tileSize;
   g_VizParams.m_visualScale = vs;
-  if (find(additionalOptions.begin(), additionalOptions.end(), YotaDevice) != additionalOptions.end())
-    g_VizParams.m_isYotaDevice = true;
 
   // Here we set up glyphs rendering parameters separately for high-res and low-res screens.
   if (vs <= 1.0)
@@ -59,36 +63,37 @@ uint32_t VisualParams::GetGlyphBaseSize() const
   return 22;
 }
 
+double VisualParams::GetFontScale() const
+{
+  return m_fontScale;
+}
+
+void VisualParams::SetFontScale(double fontScale)
+{
+  m_fontScale = fontScale;
+}
+
 VisualParams & VisualParams::Instance()
 {
   ASSERT_INITED;
   return g_VizParams;
 }
 
-string const & VisualParams::GetResourcePostfix(double visualScale, bool isYotaDevice)
+string const & VisualParams::GetResourcePostfix(double visualScale)
 {
   static visual_scale_t postfixes[] =
   {
-    make_pair("ldpi", 0.75),
-    make_pair("mdpi", 1.0),
-    make_pair("hdpi", 1.5),
-    make_pair("xhdpi", 2.0),
-    make_pair("xxhdpi", 3.0),
-    make_pair("6plus", 2.4),
+    make_pair("mdpi", kMdpiScale),
+    make_pair("hdpi", kHdpiScale),
+    make_pair("xhdpi", kXhdpiScale),
+    make_pair("xxhdpi", kXxhdpiScale),
+    make_pair("6plus", k6plusScale),
   };
-
-  static string specifixPostfixes[] =
-  {
-    "yota"
-  };
-
-  if (isYotaDevice)
-    return specifixPostfixes[0];
 
   // Looking for the nearest available scale.
   int postfixIndex = -1;
   double minValue = numeric_limits<double>::max();
-  for (int i = 0; i < ARRAY_SIZE(postfixes); i++)
+  for (int i = 0; i < static_cast<int>(ARRAY_SIZE(postfixes)); i++)
   {
     double val = fabs(postfixes[i].second - visualScale);
     if (val < minValue)
@@ -104,7 +109,7 @@ string const & VisualParams::GetResourcePostfix(double visualScale, bool isYotaD
 
 string const & VisualParams::GetResourcePostfix() const
 {
-  return VisualParams::GetResourcePostfix(m_visualScale, m_isYotaDevice);
+  return VisualParams::GetResourcePostfix(m_visualScale);
 }
 
 double VisualParams::GetVisualScale() const
@@ -143,6 +148,7 @@ VisualParams::GlyphVisualParams const & VisualParams::GetGlyphVisualParams() con
 VisualParams::VisualParams()
   : m_tileSize(0)
   , m_visualScale(0.0)
+  , m_fontScale(1.0)
 {
 }
 
@@ -220,9 +226,9 @@ m2::RectD GetRectForDrawScale(double drawScale, m2::PointD const & center)
   return GetRectForDrawScale(my::rounds(drawScale), center);
 }
 
-int CalculateTileSize(int screenWidth, int screenHeight)
+uint32_t CalculateTileSize(uint32_t screenWidth, uint32_t screenHeight)
 {
-  int const maxSz = max(screenWidth, screenHeight);
+  uint32_t const maxSz = max(screenWidth, screenHeight);
 
   // we're calculating the tileSize based on (maxSz > 1024 ? rounded : ceiled)
   // to the nearest power of two value of the maxSz
@@ -231,7 +237,9 @@ int CalculateTileSize(int screenWidth, int screenHeight)
   int res = 0;
 
   if (maxSz < 1024)
+  {
     res = ceiledSz;
+  }
   else
   {
     int const flooredSz = ceiledSz / 2;
@@ -243,9 +251,9 @@ int CalculateTileSize(int screenWidth, int screenHeight)
   }
 
 #ifndef OMIM_OS_DESKTOP
-  return my::clamp(res / 2, 256, 1024);
+  return static_cast<uint32_t>(my::clamp(res / 2, 256, 1024));
 #else
-  return my::clamp(res / 2, 512, 1024);
+  return static_cast<uint32_t>(my::clamp(res / 2, 512, 1024));
 #endif
 }
 
@@ -280,6 +288,40 @@ int GetDrawTileScale(m2::RectD const & r)
 {
   VisualParams const & p = VisualParams::Instance();
   return GetDrawTileScale(r, p.GetTileSize(), p.GetVisualScale());
+}
+
+double GetZoomLevel(double scale)
+{
+  static double const kLog2 = log(2.0);
+  return my::clamp(fabs(log(scale) / kLog2), 1.0, scales::GetUpperStyleScale() + 1.0);
+}
+
+void ExtractZoomFactors(ScreenBase const & s, double & zoom, int & index, float & lerpCoef)
+{
+  double const zoomLevel = GetZoomLevel(s.GetScale());
+  zoom = trunc(zoomLevel);
+  index = static_cast<int>(zoom - 1.0);
+  lerpCoef = static_cast<float>(zoomLevel - zoom);
+}
+
+float InterpolateByZoomLevels(int index, float lerpCoef, std::vector<float> const & values)
+{
+  ASSERT_GREATER_OR_EQUAL(index, 0, ());
+  ASSERT_GREATER(values.size(), scales::UPPER_STYLE_SCALE, ());
+  if (index < scales::UPPER_STYLE_SCALE)
+    return values[index] + lerpCoef * (values[index + 1] - values[index]);
+  return values[scales::UPPER_STYLE_SCALE];
+}
+
+double GetNormalizedZoomLevel(double scale, int minZoom)
+{
+  double const kMaxZoom = scales::GetUpperStyleScale() + 1.0;
+  return my::clamp((GetZoomLevel(scale) - minZoom) / (kMaxZoom - minZoom), 0.0, 1.0);
+}
+
+double GetScale(double zoomLevel)
+{
+  return pow(2.0, -zoomLevel);
 }
 
 } // namespace df

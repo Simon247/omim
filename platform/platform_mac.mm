@@ -1,8 +1,12 @@
 #include "platform/platform.hpp"
 
+#include "coding/file_name_utils.hpp"
+
 #include "base/logging.hpp"
 
 #include "std/target_os.hpp"
+
+#import "3party/Alohalytics/src/alohalytics_objc.h"
 
 #include <IOKit/IOKitLib.h>
 #include <Foundation/NSBundle.h>
@@ -19,13 +23,23 @@
 
 Platform::Platform()
 {
-  NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-
   // get resources directory path
   string const resourcesPath = [[[NSBundle mainBundle] resourcePath] UTF8String];
   string const bundlePath = [[[NSBundle mainBundle] bundlePath] UTF8String];
-  if (resourcesPath == bundlePath)
+
+  char const * envResourcesDir = ::getenv("MWM_RESOURCES_DIR");
+  char const * envWritableDir = ::getenv("MWM_WRITABLE_DIR");
+
+  if (envResourcesDir && envWritableDir)
   {
+    m_resourcesDir = envResourcesDir;
+    m_writableDir = envWritableDir;
+  }
+  else if (resourcesPath == bundlePath)
+  {
+#ifdef STANDALONE_APP
+    m_resourcesDir = resourcesPath + "/";
+#else // STANDALONE_APP
     // we're the console app, probably unit test, and path is our directory
     m_resourcesDir = bundlePath + "/../../data/";
     if (!IsFileExistsByFullPath(m_resourcesDir))
@@ -37,12 +51,14 @@ Platform::Platform()
       else
         m_resourcesDir = "./data/";
     }
+#endif // STANDALONE_APP
     m_writableDir = m_resourcesDir;
   }
   else
   {
+#ifdef STANDALONE_APP
     m_resourcesDir = resourcesPath + "/";
-
+#else // STANDALONE_APP
     // get writable path
     // developers can have symlink to data folder
     char const * dataPath = "../../../../../data/";
@@ -54,17 +70,33 @@ Platform::Platform()
       dataPath = "../../../../../../omim/data/";
       if (IsFileExistsByFullPath(m_resourcesDir + dataPath))
         m_writableDir = m_resourcesDir + dataPath;
+      if (m_writableDir.empty())
+      {
+        auto p = m_resourcesDir.find("/omim/");
+        if (p != std::string::npos)
+          m_writableDir = m_resourcesDir.substr(0, p) + "/omim/data/";
+      }
     }
+#endif // STANDALONE_APP
 
     if (m_writableDir.empty())
     {
       NSArray * dirPaths = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
       NSString * supportDir = [dirPaths objectAtIndex:0];
       m_writableDir = [supportDir UTF8String];
+#ifdef BUILD_DESIGNER
+      m_writableDir += "/MAPS.ME.Designer/";
+#else // BUILD_DESIGNER
       m_writableDir += "/MapsWithMe/";
+#endif // BUILD_DESIGNER
       ::mkdir(m_writableDir.c_str(), 0755);
     }
   }
+
+  if (m_resourcesDir.empty())
+    m_resourcesDir = ".";
+  m_resourcesDir = my::AddSlashIfNeeded(m_resourcesDir);
+  m_writableDir = my::AddSlashIfNeeded(m_writableDir);
 
   m_settingsDir = m_writableDir;
 
@@ -78,20 +110,9 @@ Platform::Platform()
   LOG(LDEBUG, ("Writable Directory:", m_writableDir));
   LOG(LDEBUG, ("Tmp Directory:", m_tmpDir));
   LOG(LDEBUG, ("Settings Directory:", m_settingsDir));
-
-  [pool release];
 }
 
-string Platform::UniqueClientId() const
-{
-  io_registry_entry_t ioRegistryRoot = IORegistryEntryFromPath(kIOMasterPortDefault, "IOService:/");
-  CFStringRef uuidCf = (CFStringRef) IORegistryEntryCreateCFProperty(ioRegistryRoot, CFSTR(kIOPlatformUUIDKey), kCFAllocatorDefault, 0);
-  IOObjectRelease(ioRegistryRoot);
-  char uidBuf[513];
-  CFStringGetCString(uuidCf, uidBuf, ARRAY_SIZE(uidBuf) - 1, kCFStringEncodingUTF8);
-  CFRelease(uuidCf);
-  return HashUniqueID(uidBuf);
-}
+string Platform::UniqueClientId() const { return [Alohalytics installationId].UTF8String; }
 
 static void PerformImpl(void * obj)
 {
@@ -139,3 +160,9 @@ Platform::EConnectionType Platform::ConnectionStatus()
     return EConnectionType::CONNECTION_NONE;
   return EConnectionType::CONNECTION_WIFI;
 }
+
+Platform::ChargingStatus Platform::GetChargingStatus()
+{
+  return Platform::ChargingStatus::Plugged;
+}
+

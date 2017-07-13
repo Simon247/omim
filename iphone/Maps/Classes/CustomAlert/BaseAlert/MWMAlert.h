@@ -1,40 +1,51 @@
 #include "routing/router.hpp"
 #include "storage/storage.hpp"
 
+using MWMDownloadBlock = void (^)(storage::TCountriesVec const &, MWMVoidBlock);
+
 @class MWMAlertViewController;
 @interface MWMAlert : UIView
 
-@property (weak, nonatomic) MWMAlertViewController * alertController;
+@property(weak, nonatomic) MWMAlertViewController * alertController;
 
 + (MWMAlert *)alert:(routing::IRouter::ResultCode)type;
-+ (MWMAlert *)routingMigrationAlertWithOkBlock:(TMWMVoidBlock)okBlock;
++ (MWMAlert *)routingMigrationAlertWithOkBlock:(MWMVoidBlock)okBlock;
 + (MWMAlert *)downloaderAlertWithAbsentCountries:(storage::TCountriesVec const &)countries
                                             code:(routing::IRouter::ResultCode)code
-                                         okBlock:(TMWMVoidBlock)okBlock;
+                                     cancelBlock:(MWMVoidBlock)cancelBlock
+                                   downloadBlock:(MWMDownloadBlock)downloadBlock
+                           downloadCompleteBlock:(MWMVoidBlock)downloadCompleteBlock;
 + (MWMAlert *)rateAlert;
 + (MWMAlert *)facebookAlert;
 + (MWMAlert *)locationAlert;
-+ (MWMAlert *)routingDisclaimerAlertWithInitialOrientation:(UIInterfaceOrientation)orientation;
++ (MWMAlert *)routingDisclaimerAlertWithOkBlock:(MWMVoidBlock)block;
 + (MWMAlert *)disabledLocationAlert;
-+ (MWMAlert *)noWiFiAlertWithOkBlock:(TMWMVoidBlock)okBlock;
++ (MWMAlert *)noWiFiAlertWithOkBlock:(MWMVoidBlock)okBlock;
 + (MWMAlert *)noConnectionAlert;
 + (MWMAlert *)migrationProhibitedAlert;
-+ (MWMAlert *)unsavedEditsAlertWithOkBlock:(TMWMVoidBlock)okBlock;
++ (MWMAlert *)deleteMapProhibitedAlert;
++ (MWMAlert *)unsavedEditsAlertWithOkBlock:(MWMVoidBlock)okBlock;
 + (MWMAlert *)locationServiceNotSupportedAlert;
-+ (MWMAlert *)pedestrianToastShareAlert:(BOOL)isFirstLaunch;
 + (MWMAlert *)incorrectFeauturePositionAlert;
 + (MWMAlert *)internalErrorAlert;
 + (MWMAlert *)notEnoughSpaceAlert;
 + (MWMAlert *)invalidUserNameOrPasswordAlert;
-+ (MWMAlert *)point2PointAlertWithOkBlock:(TMWMVoidBlock)okBlock needToRebuild:(BOOL)needToRebuild;
-+ (MWMAlert *)disableAutoDownloadAlertWithOkBlock:(TMWMVoidBlock)okBlock;
-+ (MWMAlert *)downloaderNoConnectionAlertWithOkBlock:(TMWMVoidBlock)okBlock cancelBlock:(TMWMVoidBlock)cancelBlock;
++ (MWMAlert *)point2PointAlertWithOkBlock:(MWMVoidBlock)okBlock needToRebuild:(BOOL)needToRebuild;
++ (MWMAlert *)disableAutoDownloadAlertWithOkBlock:(MWMVoidBlock)okBlock;
++ (MWMAlert *)downloaderNoConnectionAlertWithOkBlock:(MWMVoidBlock)okBlock
+                                         cancelBlock:(MWMVoidBlock)cancelBlock;
 + (MWMAlert *)downloaderNotEnoughSpaceAlert;
-+ (MWMAlert *)downloaderInternalErrorAlertWithOkBlock:(TMWMVoidBlock)okBlock cancelBlock:(TMWMVoidBlock)cancelBlock;
-+ (MWMAlert *)downloaderNeedUpdateAlertWithOkBlock:(TMWMVoidBlock)okBlock;
++ (MWMAlert *)downloaderInternalErrorAlertWithOkBlock:(MWMVoidBlock)okBlock
+                                          cancelBlock:(MWMVoidBlock)cancelBlock;
++ (MWMAlert *)downloaderNeedUpdateAlertWithOkBlock:(MWMVoidBlock)okBlock;
++ (MWMAlert *)placeDoesntExistAlertWithBlock:(MWMStringBlock)block;
++ (MWMAlert *)resetChangesAlertWithBlock:(MWMVoidBlock)block;
++ (MWMAlert *)deleteFeatureAlertWithBlock:(MWMVoidBlock)block;
 + (MWMAlert *)editorViralAlert;
 + (MWMAlert *)osmAuthAlert;
-- (void)close;
++ (MWMAlert *)personalInfoWarningAlertWithBlock:(MWMVoidBlock)block;
++ (MWMAlert *)trackWarningAlertWithCancelBlock:(MWMVoidBlock)block;
+- (void)close:(MWMVoidBlock)completion;
 
 - (void)setNeedsCloseAlertAfterEnterBackground;
 - (void)willRotateToInterfaceOrientation:(UIInterfaceOrientation)orientation;

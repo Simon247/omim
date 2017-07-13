@@ -7,7 +7,7 @@
 #include "platform/http_request.hpp"
 #include "platform/local_country_file_utils.hpp"
 #include "platform/platform.hpp"
-#include "platform/platform_tests_support/write_dir_changer.hpp"
+#include "platform/platform_tests_support/writable_dir_changer.hpp"
 
 #include "coding/file_name_utils.hpp"
 #include "coding/internal/file_data.hpp"
@@ -88,7 +88,7 @@ UNIT_TEST(SmallMwms_Update_Test)
 
   {
     Framework f;
-    auto & storage = f.Storage();
+    auto & storage = f.GetStorage();
     string const version = strings::to_string(storage.GetCurrentDataVersion());
     TEST(version::IsSingleMwm(storage.GetCurrentDataVersion()), ());
     TEST_EQUAL(version, kMwmVersion1, ());
@@ -126,7 +126,7 @@ UNIT_TEST(SmallMwms_Update_Test)
 
   {
     Framework f;
-    auto & storage = f.Storage();
+    auto & storage = f.GetStorage();
     string const version = strings::to_string(storage.GetCurrentDataVersion());
     TEST(version::IsSingleMwm(storage.GetCurrentDataVersion()), ());
     TEST_EQUAL(version, kMwmVersion2, ());

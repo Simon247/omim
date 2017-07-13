@@ -40,10 +40,11 @@ public:
     GeometryLayer,
     OverlayLayer,
     UserMarkLayer,
+    NavigationLayer,
     Gui
   };
 
-  GLState(uint32_t gpuProgramIndex, DepthLayer depthLayer);
+  GLState(int gpuProgramIndex, DepthLayer depthLayer);
 
   DepthLayer const & GetDepthLayer() const { return m_depthLayer; }
 
@@ -58,7 +59,7 @@ public:
 
   int GetProgramIndex() const { return m_gpuProgramIndex; }
 
-  void SetProgram3dIndex(uint32_t gpuProgram3dIndex) { m_gpuProgram3dIndex = gpuProgram3dIndex; }
+  void SetProgram3dIndex(int gpuProgram3dIndex) { m_gpuProgram3dIndex = gpuProgram3dIndex; }
   int GetProgram3dIndex() const { return m_gpuProgram3dIndex; }
 
   glConst GetDepthFunction() const;
@@ -67,13 +68,18 @@ public:
   glConst GetTextureFilter() const;
   void SetTextureFilter(glConst filter);
 
+  bool GetDrawAsLine() const;
+  void SetDrawAsLine(bool drawAsLine);
+  int GetLineWidth() const;
+  void SetLineWidth(int width);
+
   bool operator<(GLState const & other) const;
   bool operator==(GLState const & other) const;
   bool operator!=(GLState const & other) const;
 
 private:
-  uint32_t m_gpuProgramIndex;
-  uint32_t m_gpuProgram3dIndex;
+  int m_gpuProgramIndex;
+  int m_gpuProgram3dIndex;
   DepthLayer m_depthLayer;
   Blending m_blending;
   glConst m_depthFunction;
@@ -81,11 +87,23 @@ private:
 
   ref_ptr<Texture> m_colorTexture;
   ref_ptr<Texture> m_maskTexture;
+
+  bool m_drawAsLine;
+  int m_lineWidth;
+};
+
+class TextureState
+{
+public:
+  static void ApplyTextures(GLState state, ref_ptr<GpuProgram> program);
+  static uint8_t GetLastUsedSlots();
+
+private:
+  static uint8_t m_usedSlots;
 };
 
 void ApplyUniforms(UniformValuesStorage const & uniforms, ref_ptr<GpuProgram> program);
 void ApplyState(GLState state, ref_ptr<GpuProgram> program);
-void ApplyTextures(GLState state, ref_ptr<GpuProgram> program);
-void ApplyBlending(GLState state, ref_ptr<GpuProgram> program);
+void ApplyBlending(GLState state);
 
 } // namespace dp

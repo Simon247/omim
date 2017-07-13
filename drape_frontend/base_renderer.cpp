@@ -3,17 +3,20 @@
 
 #include "std/utility.hpp"
 
+#include <functional>
+
 namespace df
 {
-
 BaseRenderer::BaseRenderer(ThreadsCommutator::ThreadName name, Params const & params)
-  : m_commutator(params.m_commutator)
+  : m_apiVersion(params.m_apiVersion)
+  , m_commutator(params.m_commutator)
   , m_contextFactory(params.m_oglContextFactory)
   , m_texMng(params.m_texMng)
   , m_threadName(name)
   , m_isEnabled(true)
   , m_renderingEnablingCompletionHandler(nullptr)
   , m_wasNotified(false)
+  , m_wasContextReset(false)
 {
   m_commutator->RegisterThread(m_threadName, this);
 }
@@ -25,10 +28,9 @@ void BaseRenderer::StartThread()
 
 void BaseRenderer::StopThread()
 {
-  // send message to stop rendering in render thread
-  m_commutator->PostMessage(m_threadName,
-                            make_unique_dp<StopRenderingMessage>(),
-                            MessagePriority::High);
+  // stop rendering and close queue
+  m_selfThread.GetRoutine()->Cancel();
+  CloseQueue();
 
   // wake up render thread if necessary
   if (!m_isEnabled)
@@ -40,23 +42,18 @@ void BaseRenderer::StopThread()
   m_selfThread.Join();
 }
 
-void BaseRenderer::SetRenderingEnabled(bool const isEnabled)
+void BaseRenderer::SetRenderingEnabled(ref_ptr<dp::OGLContextFactory> contextFactory)
 {
-  // here we have to wait for completion of internal SetRenderingEnabled
-  mutex completionMutex;
-  condition_variable completionCondition;
-  bool notified = false;
-  auto completionHandler = [&]()
-  {
-    lock_guard<mutex> lock(completionMutex);
-    notified = true;
-    completionCondition.notify_one();
-  };
+  if (m_wasContextReset && contextFactory != nullptr)
+    m_contextFactory = contextFactory;
+  SetRenderingEnabled(true);
+}
 
-  SetRenderingEnabled(isEnabled, completionHandler);
-
-  unique_lock<mutex> lock(completionMutex);
-  completionCondition.wait(lock, [&notified] { return notified; });
+void BaseRenderer::SetRenderingDisabled(bool const destroyContext)
+{
+  if (destroyContext)
+    m_wasContextReset = true;
+  SetRenderingEnabled(false);
 }
 
 bool BaseRenderer::IsRenderingEnabled() const
@@ -64,17 +61,22 @@ bool BaseRenderer::IsRenderingEnabled() const
   return m_isEnabled;
 }
 
-void BaseRenderer::SetRenderingEnabled(bool const isEnabled, TCompletionHandler completionHandler)
+void BaseRenderer::SetRenderingEnabled(bool const isEnabled)
 {
   if (isEnabled == m_isEnabled)
-  {
-    if (completionHandler != nullptr)
-      completionHandler();
-
     return;
-  }
 
-  m_renderingEnablingCompletionHandler = move(completionHandler);
+  // here we have to wait for completion of internal SetRenderingEnabled
+  mutex completionMutex;
+  condition_variable completionCondition;
+  bool notified = false;
+  m_renderingEnablingCompletionHandler = [&]()
+  {
+    lock_guard<mutex> lock(completionMutex);
+    notified = true;
+    completionCondition.notify_one();
+  };
+
   if (isEnabled)
   {
     // wake up rendering thread
@@ -88,32 +90,62 @@ void BaseRenderer::SetRenderingEnabled(bool const isEnabled, TCompletionHandler 
     // if renderer thread is waiting for message let it go
     CancelMessageWaiting();
   }
+
+  unique_lock<mutex> lock(completionMutex);
+  completionCondition.wait(lock, [&notified] { return notified; });
+}
+
+bool BaseRenderer::FilterGLContextDependentMessage(ref_ptr<Message> msg)
+{
+  return msg->IsGLContextDependent();
 }
 
 void BaseRenderer::CheckRenderingEnabled()
 {
   if (!m_isEnabled)
   {
-    bool const isDrawContext = m_threadName == ThreadsCommutator::RenderThread;
-    dp::OGLContext * context = isDrawContext ? m_contextFactory->getDrawContext() :
-                                               m_contextFactory->getResourcesUploadContext();
+    dp::OGLContext * context = nullptr;
 
-    context->setRenderingEnabled(false);
+    if (m_wasContextReset)
+    {
+      using namespace std::placeholders;
+      EnableMessageFiltering(std::bind(&BaseRenderer::FilterGLContextDependentMessage, this, _1));
+      OnContextDestroy();
+    }
+    else
+    {
+      bool const isDrawContext = m_threadName == ThreadsCommutator::RenderThread;
+      context = isDrawContext ? m_contextFactory->getDrawContext() :
+                                m_contextFactory->getResourcesUploadContext();
+      context->setRenderingEnabled(false);
+    }
 
-    // nofity initiator-thread about rendering disabling
+    // notify initiator-thread about rendering disabling
     Notify();
 
     // wait for signal
     unique_lock<mutex> lock(m_renderingEnablingMutex);
     m_renderingEnablingCondition.wait(lock, [this] { return m_wasNotified; });
 
-    // here rendering is enabled again
     m_wasNotified = false;
-    m_isEnabled = true;
 
-    context->setRenderingEnabled(true);
+    if (!m_selfThread.GetRoutine()->IsCancelled())
+    {
+      // here rendering is enabled again
+      m_isEnabled = true;
 
-    // nofity initiator-thread about rendering enabling
+      if (m_wasContextReset)
+      {
+        m_wasContextReset = false;
+        DisableMessageFiltering();
+        OnContextCreate();
+      }
+      else
+      {
+        context->setRenderingEnabled(true);
+      }
+    }
+    // notify initiator-thread about rendering enabling
     // m_renderingEnablingCompletionHandler will be setup before awakening of this thread
     Notify();
   }
@@ -134,16 +166,9 @@ void BaseRenderer::WakeUp()
   m_renderingEnablingCondition.notify_one();
 }
 
-void BaseRenderer::ProcessStopRenderingMessage()
-{
-  m_selfThread.GetRoutine()->Cancel();
-  CloseQueue();
-}
-
 bool BaseRenderer::CanReceiveMessages()
 {
   threads::IRoutine * routine = m_selfThread.GetRoutine();
   return routine != nullptr && !routine->IsCancelled();
 }
-
-} // namespace df
+}  // namespace df

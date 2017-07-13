@@ -5,6 +5,7 @@ import android.support.annotation.Nullable;
 import android.support.annotation.StyleRes;
 import android.support.v4.app.DialogFragment;
 
+import com.mapswithme.maps.MwmApplication;
 import com.mapswithme.maps.R;
 import com.mapswithme.util.ThemeUtils;
 
@@ -51,10 +52,5 @@ public class BaseMwmDialogFragment extends DialogFragment
   {
     super.onPause();
     org.alohalytics.Statistics.logEvent("$onPause", getClass().getSimpleName());
-  }
-
-  public BaseMwmFragmentActivity getMwmActivity()
-  {
-    return (BaseMwmFragmentActivity) getActivity();
   }
 }

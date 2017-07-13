@@ -1,17 +1,17 @@
 #include "indexer/classificator.hpp"
 #include "indexer/feature.hpp"
 
-#include "indexer/classificator.hpp"
 #include "indexer/feature_algo.hpp"
 #include "indexer/feature_impl.hpp"
 #include "indexer/feature_loader_base.hpp"
+#include "indexer/feature_utils.hpp"
 #include "indexer/feature_visibility.hpp"
 #include "indexer/osm_editor.hpp"
 
+#include "platform/preferred_languages.hpp"
+
 #include "geometry/distance.hpp"
 #include "geometry/robust_orientation.hpp"
-
-#include "platform/preferred_languages.hpp"
 
 #include "base/range_iterator.hpp"
 #include "base/stl_helpers.hpp"
@@ -30,7 +30,7 @@ void FeatureBase::Deserialize(feature::LoaderBase * pLoader, TBuffer buffer)
   m_pLoader->Init(buffer);
 
   m_limitRect = m2::RectD::GetEmptyRect();
-  m_bTypesParsed = m_bCommonParsed = false;
+  m_typesParsed = m_commonParsed = false;
   m_header = m_pLoader->GetHeader();
 }
 
@@ -49,7 +49,7 @@ void FeatureType::ApplyPatch(editor::XMLFeature const & xml)
   // m_params.ref =
   // m_params.layer =
   // m_params.rank =
-  m_bCommonParsed = true;
+  m_commonParsed = true;
 
   xml.ForEachTag([this](string const & k, string const & v)
   {
@@ -59,12 +59,12 @@ void FeatureType::ApplyPatch(editor::XMLFeature const & xml)
     else
       LOG(LWARNING, ("Patching feature has unknown tags"));
   });
-  m_bMetadataParsed = true;
+  m_metadataParsed = true;
 
   // If types count are changed here, in ApplyPatch, new number of types should be passed
   // instead of GetTypesCount().
   m_header = CalculateHeader(GetTypesCount(), Header() & HEADER_GEOTYPE_MASK, m_params);
-  m_bHeader2Parsed = true;
+  m_header2Parsed = true;
 }
 
 void FeatureType::ReplaceBy(osm::EditableMapObject const & emo)
@@ -76,7 +76,7 @@ void FeatureType::ReplaceBy(osm::EditableMapObject const & emo)
     m_center = emo.GetMercator();
     m_limitRect.MakeEmpty();
     m_limitRect.Add(m_center);
-    m_bPointsParsed = m_bTrianglesParsed = true;
+    m_pointsParsed = m_trianglesParsed = true;
     geoType = feature::GEOM_POINT;
   }
   else
@@ -90,17 +90,17 @@ void FeatureType::ReplaceBy(osm::EditableMapObject const & emo)
     m_params.house.Clear();
   else
     m_params.house.Set(house);
-  m_bCommonParsed = true;
+  m_commonParsed = true;
 
   m_metadata = emo.GetMetadata();
-  m_bMetadataParsed = true;
+  m_metadataParsed = true;
 
   uint32_t typesCount = 0;
   for (uint32_t const type : emo.GetTypes())
     m_types[typesCount++] = type;
-  m_bTypesParsed = true;
+  m_typesParsed = true;
   m_header = CalculateHeader(typesCount, geoType, m_params);
-  m_bHeader2Parsed = true;
+  m_header2Parsed = true;
 
   m_id = emo.GetID();
 }
@@ -144,21 +144,11 @@ editor::XMLFeature FeatureType::ToXML(bool serializeType) const
     feature::TypesHolder th(*this);
     // TODO(mgsergio): Use correct sorting instead of SortBySpec based on the config.
     th.SortBySpec();
-    Classificator & cl = classif();
-    static const uint32_t internetType = cl.GetTypeByPath({"internet_access"});
     // TODO(mgsergio): Either improve "OSM"-compatible serialization for more complex types,
     // or save all our types directly, to restore and reuse them in migration of modified features.
     for (uint32_t const type : th)
     {
-      { // Avoid serialization of "internet" type, it is set separately in the Editor.
-        // Otherwise we can't reset "internet" to "Unknown" state.
-        uint32_t truncatedType = type;
-        ftype::TruncValue(truncatedType, 1);
-        if (truncatedType == internetType)
-          continue;
-      }
-
-      string const strType = cl.GetReadableObjectName(type);
+      string const strType = classif().GetReadableObjectName(type);
       strings::SimpleTokenizer iter(strType, "-");
       string const k = *iter;
       if (++iter)
@@ -182,6 +172,8 @@ editor::XMLFeature FeatureType::ToXML(bool serializeType) const
 
   for (auto const type : m_metadata.GetPresentTypes())
   {
+    if (m_metadata.IsSponsoredType(static_cast<Metadata::EType>(type)))
+      continue;
     auto const attributeName = DebugPrint(static_cast<Metadata::EType>(type));
     feature.SetTagValue(attributeName, m_metadata.Get(type));
   }
@@ -195,7 +187,7 @@ bool FeatureType::FromXML(editor::XMLFeature const & xml)
                ("At the moment only new nodes (points) can can be created."));
   m_center = xml.GetMercatorCenter();
   m_limitRect.Add(m_center);
-  m_bPointsParsed = m_bTrianglesParsed = true;
+  m_pointsParsed = m_trianglesParsed = true;
 
   xml.ForEachName([this](string const & lang, string const & name)
   {
@@ -210,7 +202,7 @@ bool FeatureType::FromXML(editor::XMLFeature const & xml)
   // m_params.ref =
   // m_params.layer =
   // m_params.rank =
-  m_bCommonParsed = true;
+  m_commonParsed = true;
 
   uint32_t typesCount = 0;
   xml.ForEachTag([this, &typesCount](string const & k, string const & v)
@@ -237,33 +229,33 @@ bool FeatureType::FromXML(editor::XMLFeature const & xml)
         LOG(LWARNING, ("Can't load/parse type:", k, v));
     }
   });
-  m_bMetadataParsed = true;
-  m_bTypesParsed = true;
+  m_metadataParsed = true;
+  m_typesParsed = true;
 
   EHeaderTypeMask const geomType = house.empty() && !m_params.ref.empty() ? HEADER_GEOM_POINT : HEADER_GEOM_POINT_EX;
   m_header = CalculateHeader(typesCount, geomType, m_params);
-  m_bHeader2Parsed = true;
+  m_header2Parsed = true;
 
   return typesCount > 0;
 }
 
 void FeatureBase::ParseTypes() const
 {
-  if (!m_bTypesParsed)
+  if (!m_typesParsed)
   {
     m_pLoader->ParseTypes();
-    m_bTypesParsed = true;
+    m_typesParsed = true;
   }
 }
 
 void FeatureBase::ParseCommon() const
 {
-  if (!m_bCommonParsed)
+  if (!m_commonParsed)
   {
     ParseTypes();
 
     m_pLoader->ParseCommon();
-    m_bCommonParsed = true;
+    m_commonParsed = true;
   }
 }
 
@@ -302,7 +294,7 @@ void FeatureType::Deserialize(feature::LoaderBase * pLoader, TBuffer buffer)
 
   m_pLoader->InitFeature(this);
 
-  m_bHeader2Parsed = m_bPointsParsed = m_bTrianglesParsed = m_bMetadataParsed = false;
+  m_header2Parsed = m_pointsParsed = m_trianglesParsed = m_metadataParsed = false;
 
   m_innerStats.MakeZero();
 }
@@ -318,12 +310,12 @@ void FeatureType::ParseEverything() const
 
 void FeatureType::ParseHeader2() const
 {
-  if (!m_bHeader2Parsed)
+  if (!m_header2Parsed)
   {
     ParseCommon();
 
     m_pLoader->ParseHeader2();
-    m_bHeader2Parsed = true;
+    m_header2Parsed = true;
   }
 }
 
@@ -335,7 +327,7 @@ void FeatureType::ResetGeometry() const
   if (GetFeatureType() != GEOM_POINT)
     m_limitRect = m2::RectD();
 
-  m_bHeader2Parsed = m_bPointsParsed = m_bTrianglesParsed = false;
+  m_header2Parsed = m_pointsParsed = m_trianglesParsed = false;
 
   m_pLoader->ResetGeometry();
 }
@@ -343,12 +335,12 @@ void FeatureType::ResetGeometry() const
 uint32_t FeatureType::ParseGeometry(int scale) const
 {
   uint32_t sz = 0;
-  if (!m_bPointsParsed)
+  if (!m_pointsParsed)
   {
     ParseHeader2();
 
     sz = m_pLoader->ParseGeometry(scale);
-    m_bPointsParsed = true;
+    m_pointsParsed = true;
   }
   return sz;
 }
@@ -356,26 +348,23 @@ uint32_t FeatureType::ParseGeometry(int scale) const
 uint32_t FeatureType::ParseTriangles(int scale) const
 {
   uint32_t sz = 0;
-  if (!m_bTrianglesParsed)
+  if (!m_trianglesParsed)
   {
     ParseHeader2();
 
     sz = m_pLoader->ParseTriangles(scale);
-    m_bTrianglesParsed = true;
+    m_trianglesParsed = true;
   }
   return sz;
 }
 
 void FeatureType::ParseMetadata() const
 {
-  if (m_bMetadataParsed) return;
+  if (m_metadataParsed) return;
 
   m_pLoader->ParseMetadata();
 
-  if (HasInternet())
-    m_metadata.Set(Metadata::FMD_INTERNET, "wlan");
-
-  m_bMetadataParsed = true;
+  m_metadataParsed = true;
 }
 
 StringUtf8Multilang const & FeatureType::GetNames() const
@@ -402,7 +391,7 @@ void FeatureType::SetNames(StringUtf8Multilang const & newNames)
 
 void FeatureType::SetMetadata(feature::Metadata const & newMetadata)
 {
-  m_bMetadataParsed = true;
+  m_metadataParsed = true;
   m_metadata = newMetadata;
 }
 
@@ -502,79 +491,69 @@ FeatureType::geom_stat_t FeatureType::GetTrianglesSize(int scale) const
   return geom_stat_t(sz, m_triangles.size());
 }
 
-struct BestMatchedLangNames
+void FeatureType::GetPreferredNames(string & primary, string & secondary) const
 {
-  string m_defaultName;
-  string m_nativeName;
-  string m_intName;
-  string m_englishName;
+  if (!HasName())
+    return;
 
-  bool operator()(int8_t code, string const & name)
-  {
-    int8_t const defaultCode = StringUtf8Multilang::kDefaultCode;
-    static int8_t const nativeCode = StringUtf8Multilang::GetLangIndex(languages::GetCurrentNorm());
-    int8_t const intCode = StringUtf8Multilang::kInternationalCode;
-    int8_t const englishCode = StringUtf8Multilang::kEnglishCode;
+  auto const mwmInfo = GetID().m_mwmId.GetInfo();
 
-    if (code == defaultCode)
-      m_defaultName = name;
-    else if (code == nativeCode)
-      m_nativeName = name;
-    else if (code == intCode)
-    {
-      // There are many "junk" names in Arabian island.
-      m_intName = name.substr(0, name.find_first_of(','));
-      // int_name should be used as name:en when name:en not found
-      if ((nativeCode == englishCode) && m_nativeName.empty())
-        m_nativeName = m_intName;
-    }
-    else if (code == englishCode)
-      m_englishName = name;
-    return true;
-  }
-};
+  if (!mwmInfo)
+    return;
 
-void FeatureType::GetPreferredNames(string & defaultName, string & intName) const
-{
   ParseCommon();
 
-  BestMatchedLangNames matcher;
-  ForEachName(matcher);
+  auto const deviceLang = StringUtf8Multilang::GetLangIndex(languages::GetCurrentNorm());
+  ::GetPreferredNames(mwmInfo->GetRegionData(), GetNames(), deviceLang, false /* allowTranslit */,
+                      primary, secondary);
+}
 
-  defaultName.swap(matcher.m_defaultName);
+void FeatureType::GetPreferredNames(bool allowTranslit, int8_t deviceLang, string & primary, string & secondary) const
+{
+  if (!HasName())
+    return;
 
-  if (!matcher.m_nativeName.empty())
-    intName.swap(matcher.m_nativeName);
-  else if (!matcher.m_intName.empty())
-    intName.swap(matcher.m_intName);
-  else
-    intName.swap(matcher.m_englishName);
+  auto const mwmInfo = GetID().m_mwmId.GetInfo();
 
-  if (defaultName.empty())
-    defaultName.swap(intName);
-  else
-  {
-    // filter out similar intName
-    if (!intName.empty() && defaultName.find(intName) != string::npos)
-      intName.clear();
-  }
+  if (!mwmInfo)
+    return;
+
+  ParseCommon();
+
+  ::GetPreferredNames(mwmInfo->GetRegionData(), GetNames(), deviceLang, allowTranslit,
+                      primary, secondary);
 }
 
 void FeatureType::GetReadableName(string & name) const
 {
+  if (!HasName())
+    return;
+
+  auto const mwmInfo = GetID().m_mwmId.GetInfo();
+
+  if (!mwmInfo)
+    return;
+
   ParseCommon();
 
-  BestMatchedLangNames matcher;
-  ForEachName(matcher);
+  auto const deviceLang = StringUtf8Multilang::GetLangIndex(languages::GetCurrentNorm());
+  ::GetReadableName(mwmInfo->GetRegionData(), GetNames(), deviceLang, false /* allowTranslit */,
+                    name);
+}
 
-  if (!matcher.m_nativeName.empty())
-    name.swap(matcher.m_nativeName);
-  else if (!matcher.m_defaultName.empty())
-    name.swap(matcher.m_defaultName);
-  else if (!matcher.m_intName.empty())
-    name.swap(matcher.m_intName);
-  else
-    name.swap(matcher.m_englishName);
+void FeatureType::GetReadableName(bool allowTranslit, int8_t deviceLang, string & name) const
+{
+  if (!HasName())
+    return;
+
+  auto const mwmInfo = GetID().m_mwmId.GetInfo();
+
+  if (!mwmInfo)
+    return;
+
+  ParseCommon();
+
+  ::GetReadableName(mwmInfo->GetRegionData(), GetNames(), deviceLang, allowTranslit, name);
 }
 
 string FeatureType::GetHouseNumber() const
@@ -606,7 +585,7 @@ uint8_t FeatureType::GetRank() const
   return m_params.rank;
 }
 
-uint32_t FeatureType::GetPopulation() const
+uint64_t FeatureType::GetPopulation() const
 {
   return feature::RankToPopulation(GetRank());
 }
@@ -617,34 +596,14 @@ string FeatureType::GetRoadNumber() const
   return m_params.ref;
 }
 
-bool FeatureType::HasInternet() const
-{
-  ParseTypes();
-
-  bool res = false;
-
-  ForEachType([&res](uint32_t type)
-  {
-    if (!res)
-    {
-      static const uint32_t t1 = classif().GetTypeByPath({"internet_access"});
-
-      ftype::TruncValue(type, 1);
-      res = (type == t1);
-    }
-  });
-
-  return res;
-}
-
 void FeatureType::SwapGeometry(FeatureType & r)
 {
-  ASSERT_EQUAL(m_bPointsParsed, r.m_bPointsParsed, ());
-  ASSERT_EQUAL(m_bTrianglesParsed, r.m_bTrianglesParsed, ());
+  ASSERT_EQUAL(m_pointsParsed, r.m_pointsParsed, ());
+  ASSERT_EQUAL(m_trianglesParsed, r.m_trianglesParsed, ());
 
-  if (m_bPointsParsed)
+  if (m_pointsParsed)
     m_points.swap(r.m_points);
 
-  if (m_bTrianglesParsed)
+  if (m_trianglesParsed)
     m_triangles.swap(r.m_triangles);
 }

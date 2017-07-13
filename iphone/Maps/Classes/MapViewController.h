@@ -1,29 +1,27 @@
-#import "LocationManager.h"
-#import "LocationPredictor.h"
+#import "MWMMapDownloaderTypes.h"
 #import "MWMViewController.h"
-#import <MyTargetSDKCorp/MTRGNativeAppwallAd.h>
+#import "SwiftBridge.h"
 
 #include "geometry/point2d.hpp"
 #include "geometry/rect2d.hpp"
 #include "indexer/map_style.hpp"
 
-namespace search { struct AddressInfo; }
+namespace search
+{
+struct AddressInfo;
+}
 
 @class MWMMapViewControlsManager;
 @class MWMAPIBar;
+@class MWMPlacePageData;
 
-@interface MapViewController : MWMViewController <LocationObserver>
-{
-  LocationPredictor * m_predictor;
-}
+@interface MapViewController : MWMViewController
+
++ (MapViewController *)controller;
 
 // called when app is terminated by system
 - (void)onTerminate;
-- (void)onEnterForeground;
-- (void)onEnterBackground;
 - (void)onGetFocus:(BOOL)isOnFocus;
-
-- (void)setMapStyle:(MapStyle)mapStyle;
 
 - (void)updateStatusBarStyle;
 
@@ -33,19 +31,16 @@ namespace search { struct AddressInfo; }
 
 - (void)openMigration;
 - (void)openBookmarks;
-- (void)openMapsDownloader;
+- (void)openMapsDownloader:(mwm::DownloaderMode)mode;
 - (void)openEditor;
-- (void)showReportController;
-
-- (void)refreshAd;
+- (void)openHotelFacilities;
+- (void)openBookmarkEditorWithData:(MWMPlacePageData *)data;
 
 - (void)initialize;
 
-@property (nonatomic) MTRGNativeAppwallAd * appWallAd;
-@property (nonatomic, readonly) BOOL isAppWallAdActive;
-
-@property (nonatomic, readonly) MWMMapViewControlsManager * controlsManager;
-@property (nonatomic) m2::PointD restoreRouteDestination;
-@property (nonatomic) MWMAPIBar * apiBar;
+@property(nonatomic, readonly) MWMMapViewControlsManager * controlsManager;
+@property(nonatomic) MWMAPIBar * apiBar;
+@property(nonatomic) MWMWelcomePageController * welcomePageController;
+@property(nonatomic) CGFloat visibleAreaBottomOffset;
 
 @end

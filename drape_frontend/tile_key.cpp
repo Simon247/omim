@@ -1,13 +1,16 @@
 #include "drape_frontend/tile_key.hpp"
+
+#include "drape_frontend/shape_view_params.hpp"
 #include "drape_frontend/tile_utils.hpp"
 
 #include "indexer/scales.hpp"
 
 #include "geometry/mercator.hpp"
 
+#include <sstream>
+
 namespace df
 {
-
 TileKey::TileKey()
   : m_x(-1), m_y(-1),
     m_zoomLevel(-1),
@@ -80,12 +83,21 @@ m2::RectD TileKey::GetGlobalRect(bool clipByDataMaxZoom) const
   return m2::RectD (startX, startY, startX + rectSize, startY + rectSize);
 }
 
-string DebugPrint(TileKey const & key)
+m2::PointI TileKey::GetTileCoords() const
 {
-  ostringstream out;
+  return m2::PointI(m_x, m_y);
+}
+
+math::Matrix<float, 4, 4> TileKey::GetTileBasedModelView(ScreenBase const & screen) const
+{
+  return screen.GetModelView(GetGlobalRect().Center(), kShapeCoordScalar);
+}
+
+std::string DebugPrint(TileKey const & key)
+{
+  std::ostringstream out;
   out << "[x = " << key.m_x << ", y = " << key.m_y << ", zoomLevel = "
       << key.m_zoomLevel << ", gen = " << key.m_generation << "]";
   return out.str();
 }
-
-} //namespace df
+}  // namespace df

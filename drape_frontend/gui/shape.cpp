@@ -91,7 +91,7 @@ void ShapeRenderer::Build(ref_ptr<dp::GpuProgramManager> mng)
 void ShapeRenderer::Render(ScreenBase const & screen, ref_ptr<dp::GpuProgramManager> mng)
 {
   array<float, 16> m;
-  m2::RectD const & pxRect = screen.PixelRect();
+  m2::RectD const & pxRect = screen.PixelRectIn3d();
   dp::MakeProjection(m, 0.0f, pxRect.SizeX(), pxRect.SizeY(), 0.0f);
 
   dp::UniformValuesStorage uniformStorage;
@@ -120,7 +120,7 @@ void ShapeRenderer::Render(ScreenBase const & screen, ref_ptr<dp::GpuProgramMana
           info.m_buffer->ApplyMutation(nullptr, mutatorRef);
         }
 
-        info.m_buffer->Render();
+        info.m_buffer->Render(info.m_state.GetDrawAsLine());
       });
 }
 
@@ -174,7 +174,7 @@ ref_ptr<Handle> ShapeRenderer::FindHandle(FeatureID const & id)
   ref_ptr<Handle> resultHandle = nullptr;
   ForEachShapeInfo([&resultHandle, &id](ShapeControl::ShapeInfo & shapeInfo)
                    {
-                     if (shapeInfo.m_handle->GetFeatureID() == id)
+                     if (shapeInfo.m_handle->GetOverlayID().m_featureId == id)
                        resultHandle = make_ref(shapeInfo.m_handle);
                    });
 

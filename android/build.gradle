@@ -7,7 +7,7 @@ buildscript {
   }
 
   dependencies {
-    classpath 'com.android.tools.build:gradle:1.3.1'
+    classpath 'com.android.tools.build:gradle:2.3.2'
     classpath 'io.fabric.tools:gradle:1.+'
   }
 }
@@ -31,24 +31,40 @@ apply plugin: 'io.fabric'
 
 dependencies {
   // android support libs
-  compile 'com.android.support:support-v4:22.2.1'
-  compile 'com.android.support:appcompat-v7:22.2.1'
-  compile 'com.android.support:recyclerview-v7:22.2.1'
-  compile 'com.android.support:design:22.2.1'
-  compile 'com.android.support:cardview-v7:22.2.1'
+  compile ('com.android.support:support-v4:23.4.0') {
+    force = true;
+  }
+  compile 'com.android.support:appcompat-v7:23.4.0'
+  compile 'com.android.support:recyclerview-v7:23.4.0'
+  compile 'com.android.support:design:23.4.0'
+  compile 'com.android.support:cardview-v7:23.4.0'
+  compile 'com.android.support:preference-v7:23.4.0'
+  compile 'com.android.support:preference-v14:23.4.0'
   // google play services
-  compile 'com.google.android.gms:play-services-location:8.4.0'
-  compile 'com.google.android.gms:play-services-analytics:8.4.0'
-  compile 'com.google.android.gms:play-services-plus:8.4.0'
+  compile 'com.google.android.gms:play-services-location:10.0.1'
+  compile 'com.google.android.gms:play-services-analytics:10.0.1'
+  compile 'com.google.android.gms:play-services-plus:10.0.1'
+  compile 'com.google.android.gms:play-services-gcm:10.0.1'
+  // statistics
+  compile 'com.flurry.android:analytics:6.7.0'
   // crash reporting
-  compile 'net.hockeyapp.android:HockeySDK:3.7.1'
   compile('com.crashlytics.sdk.android:crashlytics:2.5.5@aar') { transitive = true }
   compile('com.crashlytics.sdk.android:crashlytics-ndk:1.1.2@aar') { transitive = true }
   // 3-party
   compile 'com.facebook.android:facebook-android-sdk:4.8.0'
-  compile 'com.parse.bolts:bolts-android:1.4.0'
-  compile 'com.parse:parse-android:1.13.0'
+  compile('com.facebook.android:audience-network-sdk:4.20.0') {
+    exclude group: 'com.google.android.gms'
+    exclude group: 'com.android.support'
+  }
   compile 'com.google.code.gson:gson:2.6.1'
+  compile 'com.pushwoosh:pushwoosh:4.12.2'
+  compile 'com.my.tracker:mytracker-sdk:1.3.5'
+  compile ('com.my.target:mytarget-sdk:4.6.14') {
+    exclude group: 'com.android.support'
+  }
+  compile('com.mopub:mopub-sdk-native-static:4.11.0@aar') {
+    transitive = true
+  }
   compile fileTree(dir: '3rd_party', include: '*.jar')
   // BottomSheet
   compile project(":3rd_party:BottomSheet")
@@ -56,6 +72,11 @@ dependencies {
   // TODO remove this library when default LinearLayoutManager will be fixed.
   compile 'org.solovyev.android.views:linear-layout-manager:0.5@aar'
   compile 'com.timehop.stickyheadersrecyclerview:library:0.4.3@aar'
+  // Glide
+  compile 'com.github.bumptech.glide:glide:3.7.0'
+  // Java concurrency annotations
+  compile 'net.jcip:jcip-annotations:1.0'
+  compile 'com.android.support:multidex:1.0.1'
 }
 
 def getDate() {
@@ -75,7 +96,7 @@ crashlytics {
 
 android {
   // All properties are read from gradle.properties file
-  compileSdkVersion propTargetSdkVersion.toInteger()
+  compileSdkVersion propCompileSdkVersion.toInteger()
   buildToolsVersion propBuildToolsVersion
 
   defaultConfig {
@@ -92,8 +113,16 @@ android {
     // Crashlytics API key
     Properties props = new Properties()
     props.load(new FileInputStream("${projectDir}/fabric.properties"));
-    manifestPlaceholders = [ 'FABRIC_API_KEY': props['apiKey'] ]
+    manifestPlaceholders = ['FABRIC_API_KEY': props['apiKey']]
     buildConfigField 'String', 'FABRIC_API_KEY', /"${props['apiKey']}"/
+
+    // PushWoosh keys
+    Properties pwProps = new Properties()
+    pwProps.load(new FileInputStream("${projectDir}/pushwoosh.properties"));
+    manifestPlaceholders += ['PW_APPID': pwProps['pwAppId']]
+    buildConfigField 'String', 'PW_APPID', /"${pwProps['pwAppId']}"/
+    manifestPlaceholders += ['PW_PROJECT_ID': pwProps['pwProjectId']]
+    multiDexEnabled true
   }
 
   sourceSets.main {
@@ -223,7 +252,7 @@ android {
     android.applicationVariants.all { variant ->
       def task = variant.name.capitalize()
       project.task(type: Exec, "run${task}", dependsOn: "install${task}") {
-        commandLine android.getAdbExe(), 'shell', 'am', 'start', '-n', "${applicationId}/com.mapswithme.maps.DownloadResourcesActivity"
+        commandLine android.getAdbExe(), 'shell', 'am', 'start', '-n', "${applicationId}/com.mapswithme.maps.SplashActivity"
       }
 
       variant.outputs.each { output ->
@@ -315,8 +344,8 @@ project.ext.NDK_BUILD = android.getNdkDirectory().toString() + '/ndk-build'
 if (System.properties['os.name'].toLowerCase().contains('windows'))
   project.ext.NDK_BUILD += ".cmd"
 
-def archs = ['x86', 'armeabi-v7a-hard']
-def buildTypes = [[ndkType: 'release', cppType: "production", flags : propReleaseNdkFlags], [ndkType: 'debug', cppType: "debug", flags : propDebugNdkFlags]]
+def archs = ['x86', 'armeabi-v7a']
+def buildTypes = [[ndkType: 'release', cppType: "production", flags: propReleaseNdkFlags], [ndkType: 'debug', cppType: "debug", flags: propDebugNdkFlags]]
 
 buildTypes.each { type ->
   def suffix = type.ndkType.capitalize()
@@ -393,14 +422,14 @@ obbGenerate.dependsOn obbClean, obbMainGenerate, obbPatchGenerate, obbMainAlign,
 
 def createObbGenerateTask(type, data, name) {
   return tasks.create(name: "obb${type}Generate", type: Exec, description: 'Generate obb files') {
-    commandLine ((['zip', '-0', '-j', name, data]).flatten())
+    commandLine((['zip', '-0', '-j', name, data]).flatten())
   }
 }
 
 def createObbAlignTask(type, rawObb, alignedObb) {
   def sdkDir = "${android.getSdkDirectory().getAbsolutePath()}"
   def zipalignPath = sdkDir + File.separator + "build-tools" + File.separator +
-                     propBuildToolsVersion + File.separator + "zipalign";
+          propBuildToolsVersion + File.separator + "zipalign";
 
   return tasks.create(name: "obb${type}Align", dependsOn: "obb${type}Generate", type: Exec, description: 'Align obb files') {
     commandLine zipalignPath, '-v', '8', rawObb, alignedObb
@@ -418,9 +447,4 @@ task obbPush(dependsOn: ['obbGenerate', 'obbPushMain', 'obbPushPatch']) {
   tasks.create(type: Exec, name: 'obbPushPatch', dependsOn: 'obbRemoveOnDevice') {
     commandLine android.getAdbExe(), 'push', propObbWorldsOutput, "${obbPath}worlds.obb"
   }
-}
-
-task patchNdkR10E(type: Exec, description: 'Patches NDK r10e for bug described here https://code.google.com/p/android/issues/detail?id=179410') {
-  def cxxabiPath = "${android.getNdkDirectory().getAbsolutePath()}/sources/cxx-stl/gabi++/src/cxxabi.cc"
-  commandLine 'bash', '-c', "patch -p1 ${cxxabiPath} < ../tools/android/cxxabi.cc_patch"
 }

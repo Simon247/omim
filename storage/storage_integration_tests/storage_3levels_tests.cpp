@@ -5,7 +5,7 @@
 #include "map/framework.hpp"
 
 #include "platform/platform.hpp"
-#include "platform/platform_tests_support/write_dir_changer.hpp"
+#include "platform/platform_tests_support/writable_dir_changer.hpp"
 
 #include "coding/file_name_utils.hpp"
 
@@ -40,7 +40,7 @@ UNIT_TEST(SmallMwms_3levels_Test)
   Platform & platform = GetPlatform();
 
   Framework f;
-  auto & storage = f.Storage();
+  auto & storage = f.GetStorage();
   string const version = strings::to_string(storage.GetCurrentDataVersion());
   TEST(version::IsSingleMwm(storage.GetCurrentDataVersion()), ());
 

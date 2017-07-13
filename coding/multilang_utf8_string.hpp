@@ -1,30 +1,40 @@
 #pragma once
 
+#include "coding/reader.hpp"
 #include "coding/varint.hpp"
+#include "coding/writer.hpp"
 
 #include "base/assert.hpp"
 
+#include "std/array.hpp"
 #include "std/string.hpp"
-
 
 namespace utils
 {
-template <class TSink> void WriteString(TSink & sink, string const & s)
+template <class TSink, bool EnableExceptions = false>
+void WriteString(TSink & sink, string const & s)
 {
-  CHECK(!s.empty(), ());
+  if (EnableExceptions && s.empty())
+    MYTHROW(Writer::WriteException, ("String is empty"));
+  else
+    CHECK(!s.empty(), ());
 
   size_t const sz = s.size();
   WriteVarUint(sink, static_cast<uint32_t>(sz - 1));
   sink.Write(s.c_str(), sz);
 }
 
-template <class TSource> void ReadString(TSource & src, string & s)
+template <class TSource, bool EnableExceptions = false>
+void ReadString(TSource & src, string & s)
 {
   uint32_t const sz = ReadVarUint<uint32_t>(src) + 1;
   s.resize(sz);
   src.Read(&s[0], sz);
 
-  CHECK(!s.empty(), ());
+  if (EnableExceptions && s.empty())
+    MYTHROW(Reader::ReadException, ("String is empty"));
+  else
+    CHECK(!s.empty(), ());
 }
 }  // namespace utils
 
@@ -49,6 +59,8 @@ public:
     char const * m_code;
     /// Native language name.
     char const * m_name;
+    /// Transliterator to latin id.
+    char const * m_transliteratorId;
   };
   using Languages = array<Lang, kMaxSupportedLanguages>;
 
@@ -60,6 +72,8 @@ public:
   static char const * GetLangByCode(int8_t langCode);
   /// @returns empty string if langCode is invalid.
   static char const * GetLangNameByCode(int8_t langCode);
+  /// @returns empty string if langCode is invalid.
+  static char const * GetTransliteratorIdByCode(int8_t langCode);
 
   inline bool operator== (StringUtf8Multilang const & rhs) const
   {
@@ -105,6 +119,8 @@ public:
     else
       return false;
   }
+
+  bool HasString(int8_t lang) const;
 
   int8_t FindString(string const & utf8s) const;
 

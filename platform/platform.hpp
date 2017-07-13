@@ -1,16 +1,18 @@
 #pragma once
 
 #include "platform/country_defines.hpp"
+#include "platform/marketing_service.hpp"
 
 #include "coding/reader.hpp"
 
 #include "base/exception.hpp"
 
-#include "std/string.hpp"
-#include "std/vector.hpp"
-#include "std/utility.hpp"
-#include "std/function.hpp"
 #include "std/bitset.hpp"
+#include "std/function.hpp"
+#include "std/map.hpp"
+#include "std/string.hpp"
+#include "std/utility.hpp"
+#include "std/vector.hpp"
 
 #include "defines.hpp"
 
@@ -53,6 +55,13 @@ public:
     CONNECTION_WWAN
   };
 
+  enum class ChargingStatus : uint8_t
+  {
+    Unknown,
+    Plugged,
+    Unplugged
+  };
+
   using TFilesWithType = vector<pair<string, EFileType>>;
 
 protected:
@@ -80,17 +89,19 @@ protected:
   /// Uses m_writeableDir [w], m_resourcesDir [r], m_settingsDir [s].
   string ReadPathForFile(string const & file, string searchScope = string()) const;
 
-  /// Hash some unique string into uniform format.
-  static string HashUniqueID(string const & s);
-
   /// Returns last system call error as EError.
   static EError ErrnoToError();
+
+  /// Platform-dependent marketing services.
+  MarketingService m_marketingService;
 
 public:
   Platform();
 
   static bool IsFileExistsByFullPath(string const & filePath);
 
+  /// @return true if we can create custom texture allocator in drape
+  static bool IsCustomTextureAllocatorSupported();
   /// @return always the same writable dir for current user with slash at the end
   string WritableDir() const { return m_writableDir; }
   /// Set writable dir — use for testing and linux stuff only
@@ -126,6 +137,8 @@ public:
   /// @return path for directory in the persistent memory, can be the same
   /// as WritableDir, but on some platforms it's different
   string SettingsDir() const { return m_settingsDir; }
+  /// Set settings dir — use for testing.
+  void SetSettingsDirForTests(string const & path);
   /// @return full path to file in the settings directory
   string SettingsPathForFile(string const & file) const { return SettingsDir() + file; }
 
@@ -152,6 +165,8 @@ public:
                              TFilesWithType & outFiles);
 
   static bool IsDirectoryEmpty(string const & directory);
+  // Returns true if |path| refers to a directory. Returns false otherwise or on error.
+  static bool IsDirectory(string const & path);
 
   static EError GetFileType(string const & path, EFileType & type);
 
@@ -220,7 +235,11 @@ public:
   static EConnectionType ConnectionStatus();
   static bool IsConnected() { return ConnectionStatus() != EConnectionType::CONNECTION_NONE; }
 
+  static ChargingStatus GetChargingStatus();
+
   void SetupMeasurementSystem() const;
+
+  MarketingService & GetMarketingService() { return m_marketingService; }
 
 private:
   void GetSystemFontNames(FilesList & res) const;
@@ -229,3 +248,4 @@ private:
 extern Platform & GetPlatform();
 
 string DebugPrint(Platform::EError err);
+string DebugPrint(Platform::ChargingStatus status);

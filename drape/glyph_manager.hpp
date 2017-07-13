@@ -3,27 +3,28 @@
 #include "base/shared_buffer_manager.hpp"
 #include "base/string_utils.hpp"
 
-#include "std/unique_ptr.hpp"
-#include "std/string.hpp"
-#include "std/vector.hpp"
-
-#include "std/function.hpp"
+#include <string>
+#include <vector>
+#include <functional>
 
 namespace dp
 {
+uint32_t constexpr kSdfBorder = 4;
 
 struct UnicodeBlock;
 
 class GlyphManager
 {
 public:
+  static const int kDynamicGlyphSize;
+
   struct Params
   {
-    string m_uniBlocks;
-    string m_whitelist;
-    string m_blacklist;
+    std::string m_uniBlocks;
+    std::string m_whitelist;
+    std::string m_blacklist;
 
-    vector<string> m_fonts;
+    std::vector<std::string> m_fonts;
 
     uint32_t m_baseGlyphHeight = 22;
     uint32_t m_sdfScale = 4;
@@ -54,10 +55,10 @@ public:
       }
     }
 
-    int m_width;
-    int m_height;
+    uint32_t m_width;
+    uint32_t m_height;
 
-    int m_bitmapRows;
+    uint32_t m_bitmapRows;
     int m_bitmapPitch;
 
     SharedBufferManager::shared_buffer_ptr_t m_data;
@@ -69,21 +70,24 @@ public:
     GlyphImage m_image;
     int m_fontIndex;
     strings::UniChar m_code;
+    int m_fixedSize;
   };
 
   GlyphManager(Params const & params);
   ~GlyphManager();
 
-  Glyph GetGlyph(strings::UniChar unicodePoints);
+  Glyph GetGlyph(strings::UniChar unicodePoints, int fixedHeight);
   Glyph GenerateGlyph(Glyph const & glyph) const;
 
   void MarkGlyphReady(Glyph const & glyph);
-  bool AreGlyphsReady(strings::UniString const & str) const;
+  bool AreGlyphsReady(strings::UniString const & str, int fixedSize) const;
 
-  typedef function<void (strings::UniChar start, strings::UniChar end)> TUniBlockCallback;
+  using TUniBlockCallback = std::function<void(strings::UniChar start, strings::UniChar end)>;
   void ForEachUnicodeBlock(TUniBlockCallback const & fn) const;
 
-  Glyph GetInvalidGlyph() const;
+  Glyph GetInvalidGlyph(int fixedSize) const;
+
+  uint32_t GetBaseGlyphHeight() const;
 
 private:
   int GetFontIndex(strings::UniChar unicodePoint);
@@ -95,5 +99,4 @@ private:
   struct Impl;
   Impl * m_impl;
 };
-
-}
+}  // namespace dp

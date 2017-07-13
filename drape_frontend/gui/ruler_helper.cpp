@@ -153,6 +153,11 @@ bool RulerHelper::IsVisible(ScreenBase const & screen) const
   return !gui.IsCopyrightActive() && df::GetDrawTileScale(screen) >= VISIBLE_RULER_BOTTOM_SCALE;
 }
 
+void RulerHelper::Invalidate()
+{
+  SetTextDirty();
+}
+
 float RulerHelper::GetRulerHalfHeight() const
 {
   float const kRulerHalfHeight = 1.0f;
@@ -191,7 +196,7 @@ void RulerHelper::ResetTextDirtyFlag()
     m_isTextDirty = false;
 }
 
-void RulerHelper::GetTextInitInfo(string & alphabet, size_t & size) const
+void RulerHelper::GetTextInitInfo(string & alphabet, uint32_t & size) const
 {
   set<char> symbols;
   size_t result = 0;
@@ -199,7 +204,7 @@ void RulerHelper::GetTextInitInfo(string & alphabet, size_t & size) const
   {
     size_t stringSize = strlen(v.m_s);
     result = max(result, stringSize);
-    for (int i = 0; i < stringSize; ++i)
+    for (size_t i = 0; i < stringSize; ++i)
       symbols.insert(v.m_s[i]);
   };
 
@@ -213,7 +218,7 @@ void RulerHelper::GetTextInitInfo(string & alphabet, size_t & size) const
   });
   alphabet.append("<>");
 
-  size = result + 2; // add 2 char for symbols "< " and "> "
+  size = static_cast<uint32_t>(result) + 2; // add 2 char for symbols "< " and "> "
 }
 
 double RulerHelper::CalcMetresDiff(double value)
@@ -224,14 +229,14 @@ double RulerHelper::CalcMetresDiff(double value)
   typedef double (*ConversionFn)(double);
   ConversionFn conversionFn = &identity;
 
-  settings::Units units = settings::Metric;
-  settings::Get(settings::kMeasurementUnits, units);
+  auto units = measurement_utils::Units::Metric;
+  UNUSED_VALUE(settings::Get(settings::kMeasurementUnits, units));
 
-  if (units == settings::Foot)
+  if (units == measurement_utils::Units::Imperial)
   {
     arrU = g_arrFeets;
     count = ARRAY_SIZE(g_arrFeets);
-    conversionFn = &MeasurementUtils::MetersToFeet;
+    conversionFn = &measurement_utils::MetersToFeet;
   }
 
   int prevUnitRange = m_rangeIndex;

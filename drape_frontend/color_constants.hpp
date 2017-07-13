@@ -2,25 +2,11 @@
 
 #include "drape/color.hpp"
 
-#include "indexer/map_style.hpp"
+#include <string>
 
 namespace df
 {
+using ColorConstant = std::string;
 
-enum ColorConstant
-{
-  GuiText,
-  MyPositionAccuracy,
-  Selection,
-  Route,
-  RoutePedestrian,
-  Arrow3D,
-  TrackHumanSpeed,
-  TrackCarSpeed,
-  TrackPlaneSpeed,
-  TrackUnknownDistance
-};
-
-dp::Color GetColorConstant(MapStyle style, ColorConstant constant);
-
-} // namespace df
+dp::Color GetColorConstant(ColorConstant const & constant);
+} //  namespace df

@@ -24,11 +24,7 @@
 #if defined(OMIM_UNIT_TEST_WITH_QT_EVENT_LOOP) && !defined(OMIM_OS_IPHONE)
   #include <QtCore/Qt>
   #ifdef OMIM_OS_MAC // on Mac OS X native run loop works only for QApplication :(
-    #if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
-      #include <QtGui/QApplication>
-    #else
-      #include <QtWidgets/QApplication>
-    #endif
+    #include <QtWidgets/QApplication>
     #define QAPP QApplication
   #else
     #include <QtCore/QCoreApplication>
@@ -201,12 +197,12 @@ int main(int argc, char * argv[])
   {
     auto const & testName = testNames[iTest];
     if (g_testingOptions.m_filterRegExp &&
-        !regex_match(testName.begin(), testName.end(), filterRegExp))
+        !regex_search(testName.begin(), testName.end(), filterRegExp))
     {
       continue;
     }
     if (g_testingOptions.m_suppressRegExp &&
-        regex_match(testName.begin(), testName.end(), suppressRegExp))
+        regex_search(testName.begin(), testName.end(), suppressRegExp))
     {
       continue;
     }

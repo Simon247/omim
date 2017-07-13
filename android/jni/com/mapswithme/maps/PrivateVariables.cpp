@@ -22,22 +22,16 @@ extern "C"
     return env->NewStringUTF(MY_TRACKER_KEY);
   }
 
-  JNIEXPORT jstring JNICALL
-  Java_com_mapswithme_maps_PrivateVariables_parseApplicationId(JNIEnv * env, jclass clazz)
-  {
-    return env->NewStringUTF(PARSE_APPLICATION_ID);
-  }
-
-  JNIEXPORT jstring JNICALL
-  Java_com_mapswithme_maps_PrivateVariables_parseClientKey(JNIEnv * env, jclass clazz)
-  {
-    return env->NewStringUTF(PARSE_CLIENT_KEY);
-  }
-
-  JNIEXPORT jstring JNICALL
+  JNIEXPORT jint JNICALL
   Java_com_mapswithme_maps_PrivateVariables_myTargetSlot(JNIEnv * env, jclass clazz)
   {
-    return env->NewStringUTF(MY_TARGET_KEY);
+    return MY_TARGET_KEY;
+  }
+
+  JNIEXPORT jint JNICALL
+  Java_com_mapswithme_maps_PrivateVariables_myTargetRbSlot(JNIEnv * env, jclass clazz)
+  {
+    return MY_TARGET_RB_KEY;
   }
 
   JNIEXPORT jstring JNICALL
@@ -50,17 +44,5 @@ extern "C"
   Java_com_mapswithme_maps_PrivateVariables_myTargetCheckInterval(JNIEnv * env, jclass clazz)
   {
     return static_cast<jlong>(AD_PERMISION_CHECK_DURATION);
-  }
-
-  JNIEXPORT jstring JNICALL
-  Java_com_mapswithme_maps_PrivateVariables_hockeyAppId(JNIEnv * env, jclass clazz)
-  {
-    return env->NewStringUTF(HOCKEY_APP_KEY);
-  }
-
-  JNIEXPORT jstring JNICALL
-  Java_com_mapswithme_maps_PrivateVariables_hockeyAppBetaId(JNIEnv * env, jclass clazz)
-  {
-    return env->NewStringUTF(HOCKEY_APP_BETA_KEY);
   }
 }

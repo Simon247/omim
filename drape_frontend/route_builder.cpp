@@ -4,55 +4,52 @@
 
 namespace df
 {
-
 RouteBuilder::RouteBuilder(TFlushRouteFn const & flushRouteFn,
-                           TFlushRouteSignFn const & flushRouteSignFn)
+                           TFlushRouteArrowsFn const & flushRouteArrowsFn)
   : m_flushRouteFn(flushRouteFn)
-  , m_flushRouteSignFn(flushRouteSignFn)
+  , m_flushRouteArrowsFn(flushRouteArrowsFn)
 {}
 
-void RouteBuilder::Build(m2::PolylineD const & routePolyline, vector<double> const & turns,
-                         df::ColorConstant color, ref_ptr<dp::TextureManager> textures)
+void RouteBuilder::Build(dp::DrapeID subrouteId, drape_ptr<Subroute> && subroute,
+                         ref_ptr<dp::TextureManager> textures, int recacheId)
 {
-  CommonViewParams params;
-  params.m_minVisibleScale = 1;
-  params.m_rank = 0;
-  params.m_depth = 0.0f;
-
   drape_ptr<RouteData> routeData = make_unique_dp<RouteData>();
-  routeData->m_color = color;
-  routeData->m_sourcePolyline = routePolyline;
-  routeData->m_sourceTurns = turns;
-  RouteShape(params).Draw(textures, *routeData.get());
+  routeData->m_subrouteId = subrouteId;
+  routeData->m_subroute = std::move(subroute);
+  routeData->m_pivot = routeData->m_subroute->m_polyline.GetLimitRect().Center();
+  routeData->m_recacheId = recacheId;
+  RouteShape::CacheRoute(textures, *routeData.get());
+  m_routeCache.insert(std::make_pair(subrouteId, routeData->m_subroute->m_polyline));
 
   // Flush route geometry.
   GLFunctions::glFlush();
 
   if (m_flushRouteFn != nullptr)
-    m_flushRouteFn(move(routeData));
+    m_flushRouteFn(std::move(routeData));
 }
 
-void RouteBuilder::BuildSign(m2::PointD const & pos, bool isStart, bool isValid,
-                             ref_ptr<dp::TextureManager> textures)
+void RouteBuilder::ClearRouteCache()
 {
-  drape_ptr<RouteSignData> routeSignData = make_unique_dp<RouteSignData>();
-  routeSignData->m_isStart = isStart;
-  routeSignData->m_position = pos;
-  routeSignData->m_isValid = isValid;
-  if (isValid)
-  {
-    CommonViewParams params;
-    params.m_minVisibleScale = 1;
-    params.m_rank = 0;
-    params.m_depth = 0.0f;
-    RouteShape(params).CacheRouteSign(textures, *routeSignData.get());
-  }
+  m_routeCache.clear();
+}
 
-  // Flush route sign geometry.
+void RouteBuilder::BuildArrows(dp::DrapeID subrouteId, std::vector<ArrowBorders> const & borders,
+                               ref_ptr<dp::TextureManager> textures, int recacheId)
+{
+  auto it = m_routeCache.find(subrouteId);
+  if (it == m_routeCache.end())
+    return;
+
+  drape_ptr<RouteArrowsData> routeArrowsData = make_unique_dp<RouteArrowsData>();
+  routeArrowsData->m_subrouteId = subrouteId;
+  routeArrowsData->m_pivot = it->second.GetLimitRect().Center();
+  routeArrowsData->m_recacheId = recacheId;
+  RouteShape::CacheRouteArrows(textures, it->second, borders, *routeArrowsData.get());
+
+  // Flush route arrows geometry.
   GLFunctions::glFlush();
 
-  if (m_flushRouteSignFn != nullptr)
-    m_flushRouteSignFn(move(routeSignData));
+  if (m_flushRouteArrowsFn != nullptr)
+    m_flushRouteArrowsFn(std::move(routeArrowsData));
 }
-
-} // namespace df
+}  // namespace df

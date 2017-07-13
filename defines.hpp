@@ -15,6 +15,7 @@
 #define OFFSET_EXT ".offs"
 #define ID2REL_EXT ".id2rel"
 
+#define CENTERS_FILE_TAG "centers"
 #define DATA_FILE_TAG "dat"
 #define GEOMETRY_FILE_TAG "geom"
 #define TRIANGLE_FILE_TAG "trg"
@@ -25,10 +26,18 @@
 #define VERSION_FILE_TAG "version"
 #define METADATA_FILE_TAG "meta"
 #define METADATA_INDEX_FILE_TAG "metaidx"
+#define ALTITUDES_FILE_TAG "altitudes"
+#define ROAD_ACCESS_FILE_TAG "roadaccess"
+#define RESTRICTIONS_FILE_TAG "restrictions"
+#define ROUTING_FILE_TAG "routing"
+#define CROSS_MWM_FILE_TAG "cross_mwm"
 #define FEATURE_OFFSETS_FILE_TAG "offs"
 #define RANKS_FILE_TAG "ranks"
+#define REGION_INFO_FILE_TAG "rgninfo"
+#define METALINES_FILE_TAG "metalines"
 // Temporary addresses section that is used in search index generation.
 #define SEARCH_TOKENS_FILE_TAG "addrtags"
+#define TRAFFIC_KEYS_FILE_TAG "traffic"
 
 #define ROUTING_MATRIX_FILE_TAG "mercedes"
 #define ROUTING_EDGEDATA_FILE_TAG "daewoo"
@@ -51,6 +60,7 @@
 #define CELL2FEATURE_TMP_EXT ".c2f.tmp"
 
 #define COUNTRIES_FILE "countries.txt"
+#define COUNTRIES_META_FILE "countries_meta.txt"
 #define COUNTRIES_OBSOLETE_FILE "countries_obsolete.txt"
 
 #define WORLD_FILE_NAME "World"
@@ -58,6 +68,7 @@
 #define WORLD_COASTS_OBSOLETE_FILE_NAME "WorldCoasts_obsolete"
 
 #define SETTINGS_FILE_NAME "settings.ini"
+#define MARKETING_SETTINGS_FILE_NAME "marketing_settings.ini"
 
 #define SEARCH_CATEGORIES_FILE_NAME "categories.txt"
 
@@ -68,3 +79,13 @@
 #define EXTERNAL_RESOURCES_FILE "external_resources.txt"
 
 #define GPS_TRACK_FILENAME "gps_track.dat"
+#define RESTRICTIONS_FILENAME "restrictions.csv"
+#define ROAD_ACCESS_FILENAME "road_access.csv"
+#define METALINES_FILENAME "metalines.bin"
+
+#define TRAFFIC_FILE_EXTENSION ".traffic"
+
+#define REPLACED_TAGS_FILE "replaced_tags.txt"
+#define MIXED_TAGS_FILE "mixed_tags.txt"
+
+#define LOCALIZATION_DESCRIPTION_SUFFIX " Description"

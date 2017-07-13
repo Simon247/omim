@@ -25,16 +25,21 @@ class CountryInfoGetter
 {
 public:
   // Identifier of a region (index in m_countries array).
-  using IdType = size_t;
-  using IdSet = vector<IdType>;
+  using TRegionId = size_t;
+  using TRegionIdSet = vector<TRegionId>;
 
   CountryInfoGetter(bool isSingleMwm) : m_isSingleMwm(isSingleMwm) {}
   virtual ~CountryInfoGetter() = default;
 
   // Returns country file name without an extension for a country |pt|
-  // belongs to. If there are no such country, returns an empty
+  // belongs to. If there is no such country, returns an empty
   // string.
   TCountryId GetRegionCountryId(m2::PointD const & pt) const;
+
+  // Returns vector of countries file names without an extension for
+  // countries belong to |rect|. |rough| provides fast rough result
+  // or a slower but more precise one.
+  vector<TCountryId> GetRegionsCountryIdByRect(m2::RectD const & rect, bool rough) const;
 
   // Returns a list of country ids by a |pt| in mercator.
   // |closestCoutryIds| is filled with country ids of mwm which covers |pt| or close to it.
@@ -45,8 +50,8 @@ public:
   // Returns info for a region |pt| belongs to.
   void GetRegionInfo(m2::PointD const & pt, CountryInfo & info) const;
 
-  // Returns info for a country by file name without an extension.
-  void GetRegionInfo(string const & id, CountryInfo & info) const;
+  // Returns info for a country by id.
+  void GetRegionInfo(TCountryId const & countryId, CountryInfo & info) const;
 
   // Return limit rects of USA:
   // 0 - continental part
@@ -63,15 +68,17 @@ public:
   m2::RectD GetLimitRectForLeaf(TCountryId const & leafCountryId) const;
 
   // Returns identifiers for all regions matching to correspondent |affiliation|.
-  virtual void GetMatchedRegions(string const & affiliation, IdSet & regions) const;
+  virtual void GetMatchedRegions(string const & affiliation, TRegionIdSet & regions) const;
 
   // Returns true when |pt| belongs to at least one of the specified
   // |regions|.
-  bool IsBelongToRegions(m2::PointD const & pt, IdSet const & regions) const;
+  bool IsBelongToRegions(m2::PointD const & pt, TRegionIdSet const & regions) const;
 
-  // Returns true if there're at least one region with name equals to
-  // |fileName|.
-  bool IsBelongToRegions(string const & fileName, IdSet const & regions) const;
+  // Returns true if there're at least one region with id equals to
+  // |countryId|.
+  bool IsBelongToRegions(TCountryId const & countryId, TRegionIdSet const & regions) const;
+
+  void RegionIdsToCountryIds(TRegionIdSet const & regions, TCountriesVec & countries) const;
 
   // Clears regions cache.
   inline void ClearCaches() const { ClearCachesImpl(); }
@@ -82,7 +89,7 @@ protected:
   CountryInfoGetter() = default;
 
   // Returns identifier of a first country containing |pt|.
-  IdType FindFirstCountry(m2::PointD const & pt) const;
+  TRegionId FindFirstCountry(m2::PointD const & pt) const;
 
   // Invokes |toDo| on each country whose name starts with |prefix|.
   template <typename ToDo>
@@ -94,6 +101,9 @@ protected:
   // Returns true when |pt| belongs to a country identified by |id|.
   virtual bool IsBelongToRegionImpl(size_t id, m2::PointD const & pt) const = 0;
 
+  // Returns true when |rect| intersects a country identified by |id|.
+  virtual bool IsIntersectedByRegionImpl(size_t id, m2::RectD const & rect) const = 0;
+
   // Returns true when the distance from |pt| to country identified by |id| less then |distance|.
   virtual bool IsCloseEnough(size_t id, m2::PointD const & pt, double distance) = 0;
 
@@ -102,7 +112,7 @@ protected:
   // List of all known countries.
   vector<CountryDef> m_countries;
   // Maps all leaf country id (file names) to their indices in m_countries.
-  unordered_map<TCountryId, IdType> m_countryIndex;
+  unordered_map<TCountryId, TRegionId> m_countryIndex;
 
   TMappingAffiliations const * m_affiliations = nullptr;
 
@@ -142,6 +152,7 @@ protected:
   // CountryInfoGetter overrides:
   void ClearCachesImpl() const override;
   bool IsBelongToRegionImpl(size_t id, m2::PointD const & pt) const override;
+  bool IsIntersectedByRegionImpl(size_t id, m2::RectD const & rect) const override;
   bool IsCloseEnough(size_t id, m2::PointD const & pt, double distance) override;
 
   template <typename TFn>
@@ -164,12 +175,13 @@ public:
   void AddCountry(CountryDef const & country);
 
   // CountryInfoGetter overrides:
-  void GetMatchedRegions(string const & affiliation, IdSet & regions) const override;
+  void GetMatchedRegions(string const & affiliation, TRegionIdSet & regions) const override;
 
 protected:
   // CountryInfoGetter overrides:
   void ClearCachesImpl() const override;
   bool IsBelongToRegionImpl(size_t id, m2::PointD const & pt) const override;
+  bool IsIntersectedByRegionImpl(size_t id, m2::RectD const & rect) const override;
   bool IsCloseEnough(size_t id, m2::PointD const & pt, double distance) override;
 };
 }  // namespace storage

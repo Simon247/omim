@@ -6,15 +6,18 @@ import android.speech.tts.TextToSpeech;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.text.TextUtils;
-import android.util.Log;
-import com.mapswithme.maps.Framework;
-import com.mapswithme.maps.MwmApplication;
-import com.mapswithme.maps.R;
-import com.mapswithme.util.Config;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+
+import com.mapswithme.maps.Framework;
+import com.mapswithme.maps.MwmApplication;
+import com.mapswithme.maps.R;
+import com.mapswithme.util.Config;
+import com.mapswithme.util.log.Logger;
+import com.mapswithme.util.log.LoggerFactory;
+import com.mapswithme.util.statistics.Statistics;
 
 /**
  * {@code TtsPlayer} class manages available TTS voice languages.
@@ -35,6 +38,8 @@ public enum TtsPlayer
 {
   INSTANCE;
 
+  private static final Logger LOGGER = LoggerFactory.INSTANCE.getLogger(LoggerFactory.Type.MISC);
+  private static final String TAG = TtsPlayer.class.getSimpleName();
   private static final Locale DEFAULT_LOCALE = Locale.US;
   private static final float SPEECH_RATE = 1.2f;
 
@@ -45,6 +50,13 @@ public enum TtsPlayer
   private boolean mUnavailable;
 
   TtsPlayer() {}
+
+  private static void reportFailure(IllegalArgumentException e, String location)
+  {
+    Statistics.INSTANCE.trackEvent(Statistics.EventName.TTS_FAILURE_LOCATION,
+                                   Statistics.params().add(Statistics.EventParam.ERR_MSG, e.getMessage())
+                                                      .add(Statistics.EventParam.FROM, location));
+  }
 
   private static @Nullable LanguageData findSupportedLanguage(String internalCode, List<LanguageData> langs)
   {
@@ -70,17 +82,27 @@ public enum TtsPlayer
     return null;
   }
 
-  private void setLanguageInternal(LanguageData lang)
+  private boolean setLanguageInternal(LanguageData lang)
   {
-    mTts.setLanguage(lang.locale);
-    nativeSetTurnNotificationsLocale(lang.internalCode);
-    Config.setTtsLanguage(lang.internalCode);
+    try
+    {
+      mTts.setLanguage(lang.locale);
+      nativeSetTurnNotificationsLocale(lang.internalCode);
+      Config.setTtsLanguage(lang.internalCode);
+
+      return true;
+    }
+    catch (IllegalArgumentException e)
+    {
+      reportFailure(e, "setLanguageInternal(): " + lang.locale);
+      lockDown();
+      return false;
+    }
   }
 
-  public void setLanguage(LanguageData lang)
+  public boolean setLanguage(LanguageData lang)
   {
-    if (lang != null)
-      setLanguageInternal(lang);
+    return (lang != null && setLanguageInternal(lang));
   }
 
   private static @Nullable LanguageData getDefaultLanguage(List<LanguageData> langs)
@@ -126,7 +148,7 @@ public enum TtsPlayer
       {
         if (status == TextToSpeech.ERROR)
         {
-          Log.e("TtsPlayer", "Failed to initialize TextToSpeach");
+          LOGGER.e(TAG, "Failed to initialize TextToSpeach");
           lockDown();
           mInitializing = false;
           return;
@@ -139,16 +161,24 @@ public enum TtsPlayer
     });
   }
 
-  public boolean isReady()
+  private static boolean isReady()
   {
-    return (mTts != null && !mUnavailable && !mInitializing);
+    return (INSTANCE.mTts != null && !INSTANCE.mUnavailable && !INSTANCE.mInitializing);
   }
 
   private void speak(String textToSpeak)
   {
     if (Config.isTtsEnabled())
-      //noinspection deprecation
-      mTts.speak(textToSpeak, TextToSpeech.QUEUE_ADD, null);
+      try
+      {
+        //noinspection deprecation
+        mTts.speak(textToSpeak, TextToSpeech.QUEUE_ADD, null);
+      }
+      catch (IllegalArgumentException e)
+      {
+        reportFailure(e, "speak()");
+        lockDown();
+      }
   }
 
   public void playTurnNotifications()
@@ -164,10 +194,18 @@ public enum TtsPlayer
   public void stop()
   {
     if (isReady())
-      mTts.stop();
+      try
+      {
+        mTts.stop();
+      }
+      catch (IllegalArgumentException e)
+      {
+        reportFailure(e, "stop()");
+        lockDown();
+      }
   }
 
-  public boolean isEnabled()
+  public static boolean isEnabled()
   {
     return (isReady() && nativeAreTurnNotificationsEnabled());
   }
@@ -178,7 +216,7 @@ public enum TtsPlayer
     nativeEnableTurnNotifications(enabled);
   }
 
-  private void getUsableLanguages(List<LanguageData> outList)
+  private boolean getUsableLanguages(List<LanguageData> outList)
   {
     Resources resources = MwmApplication.get().getResources();
     String[] codes = resources.getStringArray(R.array.tts_languages_supported);
@@ -189,14 +227,26 @@ public enum TtsPlayer
       try
       {
         outList.add(new LanguageData(codes[i], names[i], mTts));
-      } catch (LanguageData.NotAvailableException ignored)
-      {}
+      }
+      catch (LanguageData.NotAvailableException ignored) {
+        LOGGER.e(TAG, "Failed to get usable languages", ignored);
+      }
+      catch (IllegalArgumentException e)
+      {
+        LOGGER.e(TAG, "Failed to get usable languages", e);
+        reportFailure(e, "getUsableLanguages()");
+        lockDown();
+        return false;
+      }
     }
+
+    return true;
   }
 
   private @Nullable LanguageData refreshLanguagesInternal(List<LanguageData> outList)
   {
-    getUsableLanguages(outList);
+    if (!getUsableLanguages(outList))
+      return null;
 
     if (outList.isEmpty())
     {

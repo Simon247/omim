@@ -1,20 +1,23 @@
 #include "drape_frontend/my_position.hpp"
 #include "drape_frontend/color_constants.hpp"
+#include "drape_frontend/map_shape.hpp"
+#include "drape_frontend/shader_def.hpp"
+#include "drape_frontend/shape_view_params.hpp"
+#include "drape_frontend/tile_utils.hpp"
 
-#include "drape/depth_constants.hpp"
+#include "drape/constants.hpp"
 #include "drape/glsl_func.hpp"
 #include "drape/glsl_types.hpp"
 #include "drape/overlay_handle.hpp"
 #include "drape/render_bucket.hpp"
-#include "drape/shader_def.hpp"
 
 #include "indexer/map_style_reader.hpp"
 
 namespace df
 {
-
 namespace
 {
+df::ColorConstant const kMyPositionAccuracyColor = "MyPositionAccuracy";
 
 struct Vertex
 {
@@ -48,8 +51,7 @@ dp::BindingInfo GetBindingInfo()
 
   return info;
 }
-
-} // namespace
+} //  namespace
 
 MyPosition::MyPosition(ref_ptr<dp::TextureManager> mng)
   : m_position(m2::PointF::Zero())
@@ -57,6 +59,7 @@ MyPosition::MyPosition(ref_ptr<dp::TextureManager> mng)
   , m_accuracy(0.0f)
   , m_showAzimuth(false)
   , m_isRoutingMode(false)
+  , m_obsoletePosition(false)
 {
   m_parts.resize(4);
   CacheAccuracySector(mng);
@@ -88,38 +91,53 @@ void MyPosition::SetRoutingMode(bool routingMode)
   m_isRoutingMode = routingMode;
 }
 
-void MyPosition::RenderAccuracy(ScreenBase const & screen,
-                        ref_ptr<dp::GpuProgramManager> mng,
-                        dp::UniformValuesStorage const & commonUniforms)
+void MyPosition::SetPositionObsolete(bool obsolete)
+{
+  m_obsoletePosition = obsolete;
+  m_arrow3d.SetPositionObsolete(obsolete);
+}
+
+void MyPosition::RenderAccuracy(ScreenBase const & screen, int zoomLevel,
+                                ref_ptr<dp::GpuProgramManager> mng,
+                                dp::UniformValuesStorage const & commonUniforms)
 {
   dp::UniformValuesStorage uniforms = commonUniforms;
   m2::PointD accuracyPoint(m_position.x + m_accuracy, m_position.y);
   float pixelAccuracy = (screen.GtoP(accuracyPoint) - screen.GtoP(m_position)).Length();
 
-  uniforms.SetFloatValue("u_position", m_position.x, m_position.y, dp::depth::POSITION_ACCURACY);
+  TileKey const key = GetTileKeyByPoint(m_position, ClipTileZoomByMaxDataZoom(zoomLevel));
+  math::Matrix<float, 4, 4> mv = key.GetTileBasedModelView(screen);
+  uniforms.SetMatrix4x4Value("modelView", mv.m_data);
+
+  m2::PointD const pos = MapShape::ConvertToLocal(m_position, key.GetGlobalRect().Center(), kShapeCoordScalar);
+  uniforms.SetFloatValue("u_position", pos.x, pos.y, 0.0f);
   uniforms.SetFloatValue("u_accuracy", pixelAccuracy);
-  uniforms.SetFloatValue("u_opacity", 1.0);
+  uniforms.SetFloatValue("u_opacity", 1.0f);
   RenderPart(mng, uniforms, MY_POSITION_ACCURACY);
 }
 
-void MyPosition::RenderMyPosition(ScreenBase const & screen,
+void MyPosition::RenderMyPosition(ScreenBase const & screen, int zoomLevel,
                                   ref_ptr<dp::GpuProgramManager> mng,
                                   dp::UniformValuesStorage const & commonUniforms)
 {
-  if (screen.isPerspective() && m_isRoutingMode && m_showAzimuth)
+  if (m_showAzimuth)
   {
     m_arrow3d.SetPosition(m_position);
     m_arrow3d.SetAzimuth(m_azimuth);
-
-    m_arrow3d.Render(screen, mng);
+    m_arrow3d.Render(screen, mng, m_isRoutingMode);
   }
   else
   {
     dp::UniformValuesStorage uniforms = commonUniforms;
-    uniforms.SetFloatValue("u_position", m_position.x, m_position.y, dp::depth::MY_POSITION_MARK);
+    TileKey const key = GetTileKeyByPoint(m_position, ClipTileZoomByMaxDataZoom(zoomLevel));
+    math::Matrix<float, 4, 4> mv = key.GetTileBasedModelView(screen);
+    uniforms.SetMatrix4x4Value("modelView", mv.m_data);
+
+    m2::PointD const pos = MapShape::ConvertToLocal(m_position, key.GetGlobalRect().Center(), kShapeCoordScalar);
+    uniforms.SetFloatValue("u_position", pos.x, pos.y, dp::depth::MY_POSITION_MARK);
     uniforms.SetFloatValue("u_azimut", -(m_azimuth + screen.GetAngle()));
     uniforms.SetFloatValue("u_opacity", 1.0);
-    RenderPart(mng, uniforms, (m_showAzimuth == true) ? MY_POSITION_ARROW : MY_POSITION_POINT);
+    RenderPart(mng, uniforms, MY_POSITION_POINT);
   }
 }
 
@@ -130,7 +148,7 @@ void MyPosition::CacheAccuracySector(ref_ptr<dp::TextureManager> mng)
   float const etalonSector = math::twicePi / static_cast<double>(TriangleCount);
 
   dp::TextureManager::ColorRegion color;
-  mng->GetColorRegion(df::GetColorConstant(GetStyleReader().GetCurrentStyle(), df::MyPositionAccuracy), color);
+  mng->GetColorRegion(df::GetColorConstant(df::kMyPositionAccuracyColor), color);
   glsl::vec2 colorCoord = glsl::ToVec2(color.GetTexRect().Center());
 
   buffer_vector<Vertex, TriangleCount> buffer;
@@ -168,43 +186,42 @@ void MyPosition::CacheAccuracySector(ref_ptr<dp::TextureManager> mng)
   }
 }
 
+void MyPosition::CacheSymbol(dp::TextureManager::SymbolRegion const & symbol,
+                             dp::GLState const & state, dp::Batcher & batcher,
+                             EMyPositionPart part)
+{
+  m2::RectF const & texRect = symbol.GetTexRect();
+  m2::PointF const halfSize = symbol.GetPixelSize() * 0.5f;
+
+  Vertex data[4] =
+  {
+    { glsl::vec2(-halfSize.x,  halfSize.y), glsl::ToVec2(texRect.LeftTop()) },
+    { glsl::vec2(-halfSize.x, -halfSize.y), glsl::ToVec2(texRect.LeftBottom()) },
+    { glsl::vec2( halfSize.x,  halfSize.y), glsl::ToVec2(texRect.RightTop()) },
+    { glsl::vec2( halfSize.x, -halfSize.y), glsl::ToVec2(texRect.RightBottom())}
+  };
+
+  dp::AttributeProvider provider(1 /* streamCount */, dp::Batcher::VertexPerQuad);
+  provider.InitStream(0 /* streamIndex */, GetBindingInfo(), make_ref(data));
+  m_parts[part].first = batcher.InsertTriangleStrip(state, make_ref(&provider), nullptr);
+  ASSERT(m_parts[part].first.IsValid(), ());
+}
+
 void MyPosition::CachePointPosition(ref_ptr<dp::TextureManager> mng)
 {
-  dp::TextureManager::SymbolRegion pointSymbol, arrowSymbol;
+  int const kSymbolsCount = 1;
+  dp::TextureManager::SymbolRegion pointSymbol;
   mng->GetSymbolRegion("current-position", pointSymbol);
-  mng->GetSymbolRegion("current-position-compas", arrowSymbol);
 
-  m2::RectF const & pointTexRect = pointSymbol.GetTexRect();
-  m2::PointF pointHalfSize = m2::PointF(pointSymbol.GetPixelSize()) * 0.5f;
-
-  Vertex pointData[4]=
-  {
-    { glsl::vec2(-pointHalfSize.x,  pointHalfSize.y), glsl::ToVec2(pointTexRect.LeftTop()) },
-    { glsl::vec2(-pointHalfSize.x, -pointHalfSize.y), glsl::ToVec2(pointTexRect.LeftBottom()) },
-    { glsl::vec2( pointHalfSize.x,  pointHalfSize.y), glsl::ToVec2(pointTexRect.RightTop()) },
-    { glsl::vec2( pointHalfSize.x, -pointHalfSize.y), glsl::ToVec2(pointTexRect.RightBottom())}
-  };
-
-  m2::RectF const & arrowTexRect = arrowSymbol.GetTexRect();
-  m2::PointF arrowHalfSize = m2::PointF(arrowSymbol.GetPixelSize()) * 0.5f;
-
-  Vertex arrowData[4]=
-  {
-    { glsl::vec2(-arrowHalfSize.x,  arrowHalfSize.y), glsl::ToVec2(arrowTexRect.LeftTop()) },
-    { glsl::vec2(-arrowHalfSize.x, -arrowHalfSize.y), glsl::ToVec2(arrowTexRect.LeftBottom()) },
-    { glsl::vec2( arrowHalfSize.x,  arrowHalfSize.y), glsl::ToVec2(arrowTexRect.RightTop()) },
-    { glsl::vec2( arrowHalfSize.x, -arrowHalfSize.y), glsl::ToVec2(arrowTexRect.RightBottom())}
-  };
-
-  m_arrow3d.SetSize(arrowSymbol.GetPixelSize().x, arrowSymbol.GetPixelSize().y);
   m_arrow3d.SetTexture(mng);
 
-  ASSERT(pointSymbol.GetTexture() == arrowSymbol.GetTexture(), ());
   dp::GLState state(gpu::MY_POSITION_PROGRAM, dp::GLState::OverlayLayer);
   state.SetColorTexture(pointSymbol.GetTexture());
 
+  dp::TextureManager::SymbolRegion * symbols[kSymbolsCount] = { &pointSymbol };
+  EMyPositionPart partIndices[kSymbolsCount] = { MY_POSITION_POINT };
   {
-    dp::Batcher batcher(2 * dp::Batcher::IndexPerQuad, 2 * dp::Batcher::VertexPerQuad);
+    dp::Batcher batcher(kSymbolsCount * dp::Batcher::IndexPerQuad, kSymbolsCount * dp::Batcher::VertexPerQuad);
     dp::SessionGuard guard(batcher, [this](dp::GLState const & state, drape_ptr<dp::RenderBucket> && b)
     {
       drape_ptr<dp::RenderBucket> bucket = move(b);
@@ -213,20 +230,12 @@ void MyPosition::CachePointPosition(ref_ptr<dp::TextureManager> mng)
       m_nodes.emplace_back(state, bucket->MoveBuffer());
     });
 
-    dp::AttributeProvider pointProvider(1 /*stream count*/, dp::Batcher::VertexPerQuad);
-    pointProvider.InitStream(0 /*stream index*/, GetBindingInfo(), make_ref(pointData));
-
-    dp::AttributeProvider arrowProvider(1 /*stream count*/, dp::Batcher::VertexPerQuad);
-    arrowProvider.InitStream(0 /*stream index*/, GetBindingInfo(), make_ref(arrowData));
-
-    m_parts[MY_POSITION_POINT].second = m_nodes.size();
-    m_parts[MY_POSITION_ARROW].second = m_nodes.size();
-
-    m_parts[MY_POSITION_POINT].first = batcher.InsertTriangleStrip(state, make_ref(&pointProvider), nullptr);
-    ASSERT(m_parts[MY_POSITION_POINT].first.IsValid(), ());
-
-    m_parts[MY_POSITION_ARROW].first = batcher.InsertTriangleStrip(state, make_ref(&arrowProvider), nullptr);
-    ASSERT(m_parts[MY_POSITION_ARROW].first.IsValid(), ());
+    int const partIndex = static_cast<int>(m_nodes.size());
+    for (int i = 0; i < kSymbolsCount; i++)
+    {
+      m_parts[partIndices[i]].second = partIndex;
+      CacheSymbol(*symbols[i], state, batcher, partIndices[i]);
+    }
   }
 }
 
@@ -234,9 +243,8 @@ void MyPosition::RenderPart(ref_ptr<dp::GpuProgramManager> mng,
                             dp::UniformValuesStorage const & uniforms,
                             MyPosition::EMyPositionPart part)
 {
-  TPart const & accuracy = m_parts[part];
-  RenderNode & node = m_nodes[accuracy.second];
-  node.Render(mng, uniforms, accuracy.first);
+  TPart const & p = m_parts[part];
+  m_nodes[p.second].Render(mng, uniforms, p.first);
 }
 
-}
+} // namespace df

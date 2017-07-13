@@ -1,6 +1,5 @@
-#import "Common.h"
+#import "MWMCommon.h"
 #import "MWMButton.h"
-#import "UIColor+MapsMeColor.h"
 
 namespace
 {
@@ -26,8 +25,6 @@ namespace
 - (void)setColoring:(MWMButtonColoring)coloring
 {
   _coloring = coloring;
-  if (isIOS7)
-    [self.imageView makeImageAlwaysTemplate];
   [self setDefaultTintColor];
 }
 
@@ -61,8 +58,6 @@ namespace
 - (void)setHighlighted:(BOOL)highlighted
 {
   [super setHighlighted:highlighted];
-  if (isIOS7)
-    [self.imageView makeImageAlwaysTemplate];
   if (highlighted)
   {
     switch (self.coloring)
@@ -76,6 +71,10 @@ namespace
       case MWMButtonColoringGray:
         self.tintColor = [UIColor blackDividers];
         break;
+      case MWMButtonColoringWhiteText:
+        self.tintColor = [UIColor whitePrimaryTextHighlighted];
+        break;
+      case MWMButtonColoringWhite:
       case MWMButtonColoringOther:
         break;
     }
@@ -92,8 +91,6 @@ namespace
 - (void)setSelected:(BOOL)selected
 {
   [super setSelected:selected];
-  if (isIOS7)
-    [self.imageView makeImageAlwaysTemplate];
   if (selected)
   {
     switch (self.coloring)
@@ -101,6 +98,8 @@ namespace
       case MWMButtonColoringBlack:
         self.tintColor = [UIColor linkBlue];
         break;
+      case MWMButtonColoringWhite:
+      case MWMButtonColoringWhiteText:
       case MWMButtonColoringBlue:
       case MWMButtonColoringOther:
       case MWMButtonColoringGray:
@@ -120,6 +119,12 @@ namespace
     case MWMButtonColoringBlack:
       self.tintColor = [UIColor blackSecondaryText];
       break;
+    case MWMButtonColoringWhite:
+      self.tintColor = [UIColor white];
+      break;
+    case MWMButtonColoringWhiteText:
+      self.tintColor = [UIColor whitePrimaryText];
+      break;
     case MWMButtonColoringBlue:
       self.tintColor = [UIColor linkBlue];
       break;
@@ -138,6 +143,10 @@ namespace
     self.coloring = MWMButtonColoringBlue;
   else if ([coloring isEqualToString:@"MWMBlack"])
     self.coloring = MWMButtonColoringBlack;
+  else if ([coloring isEqualToString:@"MWMWhite"])
+    self.coloring = MWMButtonColoringWhite;
+  else if ([coloring isEqualToString:@"MWMWhiteText"])
+    self.coloring = MWMButtonColoringWhiteText;
   else if ([coloring isEqualToString:@"MWMOther"])
     self.coloring = MWMButtonColoringOther;
   else if ([coloring isEqualToString:@"MWMGray"])

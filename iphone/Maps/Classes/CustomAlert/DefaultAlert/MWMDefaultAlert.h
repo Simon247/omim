@@ -6,6 +6,7 @@
 + (instancetype)routeFileNotExistAlert;
 + (instancetype)endPointNotFoundAlert;
 + (instancetype)startPointNotFoundAlert;
++ (instancetype)intermediatePointNotFoundAlert;
 + (instancetype)internalRoutingErrorAlert;
 + (instancetype)incorrectFeauturePositionAlert;
 + (instancetype)internalErrorAlert;
@@ -14,17 +15,24 @@
 + (instancetype)noCurrentPositionAlert;
 + (instancetype)pointsInDifferentMWMAlert;
 + (instancetype)disabledLocationAlert;
-+ (instancetype)noWiFiAlertWithOkBlock:(TMWMVoidBlock)okBlock;
++ (instancetype)noWiFiAlertWithOkBlock:(MWMVoidBlock)okBlock;
 + (instancetype)noConnectionAlert;
 + (instancetype)migrationProhibitedAlert;
-+ (instancetype)unsavedEditsAlertWithOkBlock:(TMWMVoidBlock)okBlock;
++ (instancetype)deleteMapProhibitedAlert;
++ (instancetype)unsavedEditsAlertWithOkBlock:(MWMVoidBlock)okBlock;
 + (instancetype)locationServiceNotSupportedAlert;
-+ (instancetype)point2PointAlertWithOkBlock:(TMWMVoidBlock)okBlock needToRebuild:(BOOL)needToRebuild;
-+ (instancetype)disableAutoDownloadAlertWithOkBlock:(TMWMVoidBlock)okBlock;
-+ (instancetype)downloaderNoConnectionAlertWithOkBlock:(TMWMVoidBlock)okBlock cancelBlock:(TMWMVoidBlock)cancelBlock;
++ (instancetype)point2PointAlertWithOkBlock:(MWMVoidBlock)okBlock needToRebuild:(BOOL)needToRebuild;
++ (instancetype)disableAutoDownloadAlertWithOkBlock:(MWMVoidBlock)okBlock;
++ (instancetype)downloaderNoConnectionAlertWithOkBlock:(MWMVoidBlock)okBlock
+                                           cancelBlock:(MWMVoidBlock)cancelBlock;
 + (instancetype)downloaderNotEnoughSpaceAlert;
-+ (instancetype)downloaderInternalErrorAlertWithOkBlock:(TMWMVoidBlock)okBlock cancelBlock:(TMWMVoidBlock)cancelBlock;
-+ (instancetype)downloaderNeedUpdateAlertWithOkBlock:(TMWMVoidBlock)okBlock;
-+ (instancetype)routingMigrationAlertWithOkBlock:(TMWMVoidBlock)okBlock;
++ (instancetype)downloaderInternalErrorAlertWithOkBlock:(MWMVoidBlock)okBlock
+                                            cancelBlock:(MWMVoidBlock)cancelBlock;
++ (instancetype)downloaderNeedUpdateAlertWithOkBlock:(MWMVoidBlock)okBlock;
++ (instancetype)routingMigrationAlertWithOkBlock:(MWMVoidBlock)okBlock;
++ (instancetype)resetChangesAlertWithBlock:(MWMVoidBlock)block;
++ (instancetype)deleteFeatureAlertWithBlock:(MWMVoidBlock)block;
++ (instancetype)personalInfoWarningAlertWithBlock:(MWMVoidBlock)block;
++ (instancetype)trackWarningAlertWithCancelBlock:(MWMVoidBlock)block;
 
 @end

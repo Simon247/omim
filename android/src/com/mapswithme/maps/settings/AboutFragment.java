@@ -43,13 +43,6 @@ public class AboutFragment extends BaseSettingsFragment
   }
 
   @Override
-  protected BaseShadowController createShadowController()
-  {
-    clearPaddings();
-    return new ScrollViewShadowController((ObservableScrollView) mFrame.findViewById(R.id.content_frame));
-  }
-
-  @Override
   public View onCreateView(LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState)
   {
     super.onCreateView(inflater, container, savedInstanceState);
@@ -58,7 +51,7 @@ public class AboutFragment extends BaseSettingsFragment
         .setText(getString(R.string.version, BuildConfig.VERSION_NAME));
 
     ((TextView) mFrame.findViewById(R.id.data_version))
-      .setText(getString(R.string.data_version, Framework.nativeGetDataVersion()));
+        .setText(getString(R.string.data_version, Framework.nativeGetDataVersion()));
 
     setupItem(R.id.web, true);
     setupItem(R.id.blog, true);
@@ -127,7 +120,8 @@ public class AboutFragment extends BaseSettingsFragment
       case R.id.copyright:
         Statistics.INSTANCE.trackEvent(Statistics.EventName.Settings.COPYRIGHT);
         AlohaHelper.logClick(AlohaHelper.Settings.COPYRIGHT);
-        getSettingsActivity().switchToFragment(CopyrightFragment.class, R.string.copyright);
+        getSettingsActivity().replaceFragment(CopyrightFragment.class,
+                                              getString(R.string.copyright), null);
         break;
       }
     } catch (ActivityNotFoundException e)

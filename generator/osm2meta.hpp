@@ -4,7 +4,7 @@
 #include "indexer/classificator.hpp"
 #include "indexer/ftypes_matcher.hpp"
 
-#include "std/string.hpp"
+#include <string>
 
 struct MetadataTagProcessorImpl
 {
@@ -13,25 +13,28 @@ struct MetadataTagProcessorImpl
   {
   }
 
-  string ValidateAndFormat_maxspeed(string const & v) const;
-  string ValidateAndFormat_stars(string const & v) const;
-  string ValidateAndFormat_cuisine(string v) const;
-  string ValidateAndFormat_operator(string const & v) const;
-  string ValidateAndFormat_url(string const & v) const;
-  string ValidateAndFormat_phone(string const & v) const;
-  string ValidateAndFormat_opening_hours(string const & v) const;
-  string ValidateAndFormat_ele(string const & v) const;
-  string ValidateAndFormat_turn_lanes(string const & v) const;
-  string ValidateAndFormat_turn_lanes_forward(string const & v) const;
-  string ValidateAndFormat_turn_lanes_backward(string const & v) const;
-  string ValidateAndFormat_email(string const & v) const;
-  string ValidateAndFormat_postcode(string const & v) const;
-  string ValidateAndFormat_flats(string const & v) const;
-  string ValidateAndFormat_internet(string v) const;
-  string ValidateAndFormat_height(string const & v) const;
-  string ValidateAndFormat_building_levels(string v) const;
-  string ValidateAndFormat_denomination(string const & v) const;
-  string ValidateAndFormat_wikipedia(string v) const;
+  std::string ValidateAndFormat_maxspeed(std::string const & v) const;
+  std::string ValidateAndFormat_stars(std::string const & v) const;
+  std::string ValidateAndFormat_cuisine(std::string v) const;
+  std::string ValidateAndFormat_operator(std::string const & v) const;
+  std::string ValidateAndFormat_url(std::string const & v) const;
+  std::string ValidateAndFormat_phone(std::string const & v) const;
+  std::string ValidateAndFormat_opening_hours(std::string const & v) const;
+  std::string ValidateAndFormat_ele(std::string const & v) const;
+  std::string ValidateAndFormat_turn_lanes(std::string const & v) const;
+  std::string ValidateAndFormat_turn_lanes_forward(std::string const & v) const;
+  std::string ValidateAndFormat_turn_lanes_backward(std::string const & v) const;
+  std::string ValidateAndFormat_email(std::string const & v) const;
+  std::string ValidateAndFormat_postcode(std::string const & v) const;
+  std::string ValidateAndFormat_flats(std::string const & v) const;
+  std::string ValidateAndFormat_internet(std::string v) const;
+  std::string ValidateAndFormat_height(std::string const & v) const;
+  std::string ValidateAndFormat_building_levels(std::string v) const;
+  std::string ValidateAndFormat_denomination(std::string const & v) const;
+  std::string ValidateAndFormat_wikipedia(std::string v) const;
+  std::string ValidateAndFormat_price_rate(std::string const & v) const;
+  std::string ValidateAndFormat_sponsored_id(std::string const & v) const;
+  std::string ValidateAndFormat_rating(std::string const & v) const;
 
 protected:
   FeatureParams & m_params;
@@ -45,7 +48,7 @@ public:
   /// Since it is used as a functor wich stops iteration in ftype::ForEachTag
   /// and the is no need for interrupting it always returns false.
   /// TODO(mgsergio): Move to cpp after merge with https://github.com/mapsme/omim/pull/1314
-  bool operator() (string const & k, string const & v)
+  bool operator() (std::string const & k, std::string const & v)
   {
     if (v.empty())
       return false;
@@ -66,7 +69,7 @@ public:
       return false;
     }
 
-    string valid;
+    std::string valid;
     switch (mdType)
     {
     case Metadata::FMD_CUISINE: valid = ValidateAndFormat_cuisine(v); break;
@@ -77,7 +80,7 @@ public:
     case Metadata::FMD_OPERATOR: valid = ValidateAndFormat_operator(v); break;
     case Metadata::FMD_URL:  // The same validator as for website.
     case Metadata::FMD_WEBSITE: valid = ValidateAndFormat_url(v); break;
-    case Metadata::FMD_INTERNET: ValidateAndFormat_internet(v); break;
+    case Metadata::FMD_INTERNET: valid = ValidateAndFormat_internet(v); break;
     case Metadata::FMD_ELE: valid = ValidateAndFormat_ele(v); break;
     case Metadata::FMD_TURN_LANES: valid = ValidateAndFormat_turn_lanes(v); break;
     case Metadata::FMD_TURN_LANES_FORWARD: valid = ValidateAndFormat_turn_lanes_forward(v); break;
@@ -91,6 +94,10 @@ public:
     case Metadata::FMD_HEIGHT: valid = ValidateAndFormat_height(v); break;
     case Metadata::FMD_DENOMINATION: valid = ValidateAndFormat_denomination(v); break;
     case Metadata::FMD_BUILDING_LEVELS: valid = ValidateAndFormat_building_levels(v); break;
+    case Metadata::FMD_SPONSORED_ID: valid = ValidateAndFormat_sponsored_id(v); break;
+    case Metadata::FMD_PRICE_RATE: valid = ValidateAndFormat_price_rate(v); break;
+    case Metadata::FMD_RATING: valid = ValidateAndFormat_rating(v); break;
+    case Metadata::FMD_BANNER_URL: valid = ValidateAndFormat_url(v); break;
 
     case Metadata::FMD_TEST_ID:
     case Metadata::FMD_COUNT: CHECK(false, ("FMD_COUNT can not be used as a type."));

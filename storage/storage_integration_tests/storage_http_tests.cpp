@@ -8,7 +8,7 @@
 #include "platform/mwm_version.hpp"
 #include "platform/platform.hpp"
 #include "platform/platform_tests_support/scoped_dir.hpp"
-#include "platform/platform_tests_support/write_dir_changer.hpp"
+#include "platform/platform_tests_support/writable_dir_changer.hpp"
 
 #include "coding/file_name_utils.hpp"
 
@@ -173,7 +173,7 @@ UNIT_CLASS_TEST(StorageHttpTest, StorageDownloadAndDeleteDisputedNode)
 
   TCountriesVec const expectedDownloadedChildren = {"Argentina", kDisputedCountryId2,  kDisputedCountryId1};
   TEST_EQUAL(downloadedChildren, expectedDownloadedChildren, ());
-  TEST_EQUAL(availChildren.size(), 221, ());
+  TEST_EQUAL(availChildren.size(), 223, ());
 
   m_storage.DeleteNode(kDisputedCountryId1);
   m_storage.DeleteNode(kDisputedCountryId2);

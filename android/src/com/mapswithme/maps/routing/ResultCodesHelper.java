@@ -3,12 +3,13 @@ package com.mapswithme.maps.routing;
 import android.content.res.Resources;
 import android.util.Pair;
 
-import java.util.ArrayList;
-import java.util.List;
-
-import com.mapswithme.maps.LocationState;
 import com.mapswithme.maps.MwmApplication;
 import com.mapswithme.maps.R;
+import com.mapswithme.maps.location.LocationHelper;
+import com.mapswithme.maps.location.LocationState;
+
+import java.util.ArrayList;
+import java.util.List;
 
 class ResultCodesHelper
 {
@@ -16,15 +17,16 @@ class ResultCodesHelper
   static final int NO_ERROR = 0;
   static final int CANCELLED = 1;
   static final int NO_POSITION = 2;
-  static final int INCONSISTENT_MWM_ROUTE = 3;
-  static final int ROUTING_FILE_NOT_EXIST = 4;
-  static final int START_POINT_NOT_FOUND = 5;
-  static final int END_POINT_NOT_FOUND = 6;
-  static final int DIFFERENT_MWM = 7;
-  static final int ROUTE_NOT_FOUND = 8;
-  static final int NEED_MORE_MAPS = 9;
-  static final int INTERNAL_ERROR = 10;
-  static final int FILE_TOO_OLD = 11;
+  private static final int INCONSISTENT_MWM_ROUTE = 3;
+  private static final int ROUTING_FILE_NOT_EXIST = 4;
+  private static final int START_POINT_NOT_FOUND = 5;
+  private static final int END_POINT_NOT_FOUND = 6;
+  private static final int DIFFERENT_MWM = 7;
+  private static final int ROUTE_NOT_FOUND = 8;
+  private static final int NEED_MORE_MAPS = 9;
+  private static final int INTERNAL_ERROR = 10;
+  private static final int FILE_TOO_OLD = 11;
+  private static final int INTERMEDIATE_POINT_NOT_FOUND = 12;
 
   static Pair<String, String> getDialogTitleSubtitle(int errorCode, int missingCount)
   {
@@ -34,7 +36,7 @@ class ResultCodesHelper
     switch (errorCode)
     {
     case NO_POSITION:
-      if (LocationState.INSTANCE.getLocationStateMode() == LocationState.UNKNOWN_POSITION)
+      if (LocationHelper.INSTANCE.getMyPositionMode() == LocationState.NOT_FOLLOW_NO_POSITION)
       {
         titleRes = R.string.dialog_routing_location_turn_on;
         messages.add(resources.getString(R.string.dialog_routing_location_unknown_turn_on));
@@ -60,6 +62,10 @@ class ResultCodesHelper
       titleRes = R.string.dialog_routing_change_end;
       messages.add(resources.getString(R.string.dialog_routing_end_not_determined));
       messages.add(resources.getString(R.string.dialog_routing_select_closer_end));
+      break;
+    case INTERMEDIATE_POINT_NOT_FOUND:
+      titleRes = R.string.dialog_routing_change_intermediate;
+      messages.add(resources.getString(R.string.dialog_routing_intermediate_not_determined));
       break;
     case DIFFERENT_MWM:
       messages.add(resources.getString(R.string.routing_failed_cross_mwm_building));
@@ -94,13 +100,36 @@ class ResultCodesHelper
 
     StringBuilder builder = new StringBuilder();
     for (String messagePart : messages)
-      builder.append(messagePart).append("\n\n");
+    {
+      if (builder.length() > 0)
+        builder.append("\n\n");
+
+      builder.append(messagePart);
+    }
 
     return new Pair<>(titleRes == 0 ? "" : resources.getString(titleRes), builder.toString());
   }
 
-  static boolean isDownloadable(int resultCode)
+  static boolean isDownloadable(int resultCode, int missingCount)
   {
-    return resultCode == INCONSISTENT_MWM_ROUTE || resultCode == ROUTING_FILE_NOT_EXIST;
+    if (missingCount <= 0)
+      return false;
+
+    switch (resultCode)
+    {
+      case INCONSISTENT_MWM_ROUTE:
+      case ROUTING_FILE_NOT_EXIST:
+      case NEED_MORE_MAPS:
+      case ROUTE_NOT_FOUND:
+      case FILE_TOO_OLD:
+        return true;
+    }
+
+    return false;
+  }
+
+  static boolean isMoreMapsNeeded(int resultCode)
+  {
+    return resultCode == NEED_MORE_MAPS;
   }
 }

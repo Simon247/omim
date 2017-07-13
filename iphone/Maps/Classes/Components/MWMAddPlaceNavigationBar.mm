@@ -1,18 +1,23 @@
-#import "Common.h"
+#import "MWMCommon.h"
 #import "MWMAddPlaceNavigationBar.h"
 
 #include "Framework.h"
 
 @interface MWMAddPlaceNavigationBar ()
 
-@property (copy, nonatomic) TMWMVoidBlock doneBlock;
-@property (copy, nonatomic) TMWMVoidBlock cancelBlock;
+@property(copy, nonatomic) MWMVoidBlock doneBlock;
+@property(copy, nonatomic) MWMVoidBlock cancelBlock;
 
 @end
 
 @implementation MWMAddPlaceNavigationBar
 
-+ (void)showInSuperview:(UIView *)superview doneBlock:(TMWMVoidBlock)done cancelBlock:(TMWMVoidBlock)cancel
++ (void)showInSuperview:(UIView *)superview
+             isBusiness:(BOOL)isBusiness
+          applyPosition:(BOOL)applyPosition
+               position:(m2::PointD const &)position
+              doneBlock:(MWMVoidBlock)done
+            cancelBlock:(MWMVoidBlock)cancel
 {
   MWMAddPlaceNavigationBar * navBar = [[[NSBundle mainBundle] loadNibNamed:self.className owner:nil options:nil] firstObject];
   navBar.width = superview.width;
@@ -22,13 +27,13 @@
   [navBar setNeedsLayout];
   navBar.origin = {0., -navBar.height};
   [superview addSubview:navBar];
-  [navBar show];
+  [navBar show:isBusiness applyPosition:applyPosition position:position];
 }
 
-- (void)show
+- (void)show:(BOOL)enableBounds applyPosition:(BOOL)applyPosition position:(m2::PointD const &)position
 {
   auto & f = GetFramework();
-  f.EnableChoosePositionMode(true);
+  f.EnableChoosePositionMode(true /* enable */, enableBounds, applyPosition, position);
   f.BlockTapEvents(true);
 
   [UIView animateWithDuration:kDefaultAnimationDuration animations:^
@@ -37,10 +42,10 @@
   }];
 }
 
-- (void)dismiss
+- (void)dismissWithBlock:(MWMVoidBlock)block
 {
   auto & f = GetFramework();
-  f.EnableChoosePositionMode(false);
+  f.EnableChoosePositionMode(false /* enable */, false /* enableBounds */, false /* applyPosition */, m2::PointD());
   f.BlockTapEvents(false);
 
   [UIView animateWithDuration:kDefaultAnimationDuration animations:^
@@ -50,19 +55,18 @@
   completion:^(BOOL finished)
   {
     [self removeFromSuperview];
+    block();
   }];
 }
 
 - (IBAction)doneTap
 {
-  [self dismiss];
-  self.doneBlock();
+  [self dismissWithBlock:self.doneBlock];
 }
 
 - (IBAction)cancelTap
 {
-  [self dismiss];
-  self.cancelBlock();
+  [self dismissWithBlock:self.cancelBlock];
 }
 
 - (void)layoutSubviews

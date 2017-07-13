@@ -15,6 +15,8 @@
 #include "drape/drape_global.hpp"
 #include "drape/color.hpp"
 
+#include "drape_frontend/color_constants.hpp"
+
 #include "platform/platform.hpp"
 
 #include "base/stl_add.hpp"
@@ -27,14 +29,14 @@
 
 Bookmark::Bookmark(m2::PointD const & ptOrg, UserMarkContainer * container)
   : TBase(ptOrg, container)
-  , m_runCreationAnim(true)
+  , m_hasCreationAnimation(false)
 {
 }
 
 Bookmark::Bookmark(BookmarkData const & data, m2::PointD const & ptOrg, UserMarkContainer * container)
   : TBase(ptOrg, container)
   , m_data(data)
-  , m_runCreationAnim(true)
+  , m_hasCreationAnimation(false)
 {
 }
 
@@ -63,11 +65,16 @@ UserMark::Type Bookmark::GetMarkType() const
   return UserMark::Type::BOOKMARK;
 }
 
-bool Bookmark::RunCreationAnim() const
+bool Bookmark::HasCreationAnimation() const
 {
-  bool result = m_runCreationAnim;
-  m_runCreationAnim = false;
+  bool const result = m_hasCreationAnimation;
+  m_hasCreationAnimation = false;
   return result;
+}
+
+void Bookmark::SetCreationAnimationShown(bool shown)
+{
+  m_hasCreationAnimation = !shown;
 }
 
 string const & Bookmark::GetName() const
@@ -181,7 +188,8 @@ namespace
   string const kStyleUrl = "styleUrl";
   string const kPair = "Pair";
 
-  dp::Color const kDefaultTrackColor = dp::Extract(0xFF33CCFF);
+  string const kDefaultTrackColor = "DefaultTrackColor";
+  float const kDefaultTrackWidth = 15.0f;
 
   string PointToString(m2::PointD const & org)
   {
@@ -244,7 +252,7 @@ namespace
       m_scale = -1.0;
       m_timeStamp = my::INVALID_TIME_STAMP;
 
-      m_trackColor = kDefaultTrackColor;
+      m_trackColor = df::GetColorConstant(kDefaultTrackColor);
       m_styleId.clear();
       m_mapStyleId.clear();
       m_styleUrlKey.clear();
@@ -405,12 +413,11 @@ namespace
           {
             Bookmark * bm = static_cast<Bookmark *>(m_controller.CreateUserMark(m_org));
             bm->SetData(BookmarkData(m_name, m_type, m_description, m_scale, m_timeStamp));
-            bm->RunCreationAnim();
           }
           else if (GEOMETRY_TYPE_LINE == m_geometryType)
           {
             Track::Params params;
-            params.m_colors.push_back({ 5.0f, m_trackColor });
+            params.m_colors.push_back({ kDefaultTrackWidth, m_trackColor });
             params.m_name = m_name;
 
             /// @todo Add description, style, timestamp
@@ -426,7 +433,7 @@ namespace
           if (!m_styleId.empty())
           {
             m_styleUrl2Color[m_styleId] = m_trackColor;
-            m_trackColor = kDefaultTrackColor;
+            m_trackColor = df::GetColorConstant(kDefaultTrackColor);
           }
         }
       }
@@ -769,7 +776,7 @@ void BookmarkCategory::SaveToKML(ostream & s)
     s << "    <LineString><coordinates>";
 
     Track::PolylineD const & poly = track->GetPolyline();
-    for (Track::PolylineD::TIter pt = poly.Begin(); pt != poly.End(); ++pt)
+    for (auto pt = poly.Begin(); pt != poly.End(); ++pt)
       s << PointToString(*pt) << " ";
 
     s << "    </coordinates></LineString>\n"

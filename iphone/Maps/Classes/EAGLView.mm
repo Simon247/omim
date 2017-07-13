@@ -1,10 +1,11 @@
-#import "Common.h"
+#import "MWMCommon.h"
 #import "EAGLView.h"
 #import "MapsAppDelegate.h"
-#import "LocationManager.h"
 #import "MWMDirectionView.h"
 
-#import "../Platform/opengl/iosOGLContextFactory.h"
+#import "iosOGLContextFactory.h"
+
+#import "3party/Alohalytics/src/alohalytics_objc.h"
 
 #include "Framework.h"
 #include "indexer/classificator_loader.hpp"
@@ -21,17 +22,6 @@
 
 namespace
 {
-// Returns native scale if it's possible.
-double correctContentScale()
-{
-  UIScreen * uiScreen = [UIScreen mainScreen];
-  
-  if (isIOS7)
-    return [uiScreen respondsToSelector:@selector(scale)] ? [uiScreen scale] : 1.f;
-  else
-    return [uiScreen respondsToSelector:@selector(nativeScale)] ? [uiScreen nativeScale] : 1.f;
-}
-
 // Returns DPI as exact as possible. It works for iPhone, iPad and iWatch.
 double getExactDPI(double contentScaleFactor)
 {
@@ -62,17 +52,29 @@ double getExactDPI(double contentScaleFactor)
 {
   NSLog(@"EAGLView initWithCoder Started");
   self = [super initWithCoder:coder];
-  if (self && !MapsAppDelegate.theApp.isDaemonMode)
+  if (self)
     [self initialize];
 
   NSLog(@"EAGLView initWithCoder Ended");
   return self;
 }
 
+- (dp::ApiVersion)getSupportedApiVersion
+{
+  dp::ApiVersion apiVersion = dp::ApiVersion::OpenGLES2;
+  EAGLContext * tempContext = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES3];
+  if (tempContext != nil)
+  {
+    tempContext = nil;
+    apiVersion = dp::ApiVersion::OpenGLES3;
+  }
+  return apiVersion;
+}
+
 - (void)initialize
 {
   lastViewSize = CGRectZero;
-  _widgetsManager = [[MWMMapWidgets alloc] init];
+  m_apiVersion = [self getSupportedApiVersion];
 
   // Setup Layer Properties
   CAEAGLLayer * eaglLayer = (CAEAGLLayer *)self.layer;
@@ -82,28 +84,27 @@ double getExactDPI(double contentScaleFactor)
                                    kEAGLDrawablePropertyColorFormat : kEAGLColorFormatRGBA8};
 
   // Correct retina display support in opengl renderbuffer
-  self.contentScaleFactor = correctContentScale();
+  self.contentScaleFactor = [[UIScreen mainScreen] nativeScale];
 
-  m_factory = make_unique_dp<dp::ThreadSafeFactory>(new iosOGLContextFactory(eaglLayer));
+  m_factory = make_unique_dp<dp::ThreadSafeFactory>(new iosOGLContextFactory(eaglLayer, m_apiVersion));
 }
 
 - (void)createDrapeEngineWithWidth:(int)width height:(int)height
 {
-  NSLog(@"EAGLView createDrapeEngine Started");
-  if (MapsAppDelegate.theApp.isDaemonMode)
-    return;
-
+  LOG(LINFO, ("EAGLView createDrapeEngine Started"));
+  
   Framework::DrapeCreationParams p;
+  p.m_apiVersion = m_apiVersion;
   p.m_surfaceWidth = width;
   p.m_surfaceHeight = height;
   p.m_visualScale = dp::VisualScale(getExactDPI(self.contentScaleFactor));
+  p.m_hints.m_isFirstLaunch = [Alohalytics isFirstSession];
+  p.m_hints.m_isLaunchByDeepLink = self.isLaunchByDeepLink;
 
   [self.widgetsManager setupWidgets:p];
   GetFramework().CreateDrapeEngine(make_ref(m_factory), move(p));
 
-  _drapeEngineCreated = YES;
-
-  NSLog(@"EAGLView createDrapeEngine Ended");
+  LOG(LINFO, ("EAGLView createDrapeEngine Ended"));
 }
 
 - (void)addSubview:(UIView *)view
@@ -125,7 +126,16 @@ double getExactDPI(double contentScaleFactor)
   {
     GetFramework().OnSize(width, height);
     [self.widgetsManager resize:CGSizeMake(width, height)];
+    self->_drapeEngineCreated = YES;
   });
+}
+
+- (m2::PointU)pixelSize
+{
+  CGSize const s = self.bounds.size;
+  uint32_t const w = static_cast<uint32_t>(s.width * self.contentScaleFactor);
+  uint32_t const h = static_cast<uint32_t>(s.height * self.contentScaleFactor);
+  return m2::PointU(w, h);
 }
 
 - (void)onSize:(int)width withHeight:(int)height
@@ -134,10 +144,7 @@ double getExactDPI(double contentScaleFactor)
   int h = height * self.contentScaleFactor;
 
   if (GetFramework().GetDrapeEngine() == nullptr)
-  {
     [self createDrapeEngineWithWidth:w height:h];
-    return;
-  }
 
   [self applyOnSize:w withHeight:h];
 }
@@ -176,6 +183,13 @@ double getExactDPI(double contentScaleFactor)
 - (void)setPresentAvailable:(BOOL)available
 {
   m_factory->CastFactory<iosOGLContextFactory>()->setPresentAvailable(available);
+}
+
+- (MWMMapWidgets *)widgetsManager
+{
+  if (!_widgetsManager)
+    _widgetsManager = [[MWMMapWidgets alloc] init];
+  return _widgetsManager;
 }
 
 @end

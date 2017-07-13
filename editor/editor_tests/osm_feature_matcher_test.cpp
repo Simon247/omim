@@ -261,7 +261,8 @@ char const * const osmRawResponseRelation = R"SEP(
  </relation>
 </osm>
 )SEP";
-}  // namespace
+
+// Note: Geometry should not contain duplicates.
 
 UNIT_TEST(GetBestOsmNode_Test)
 {
@@ -277,8 +278,8 @@ UNIT_TEST(GetBestOsmNode_Test)
     pugi::xml_document osmResponse;
     TEST(osmResponse.load_buffer(osmRawResponseNode, ::strlen(osmRawResponseNode)), ());
 
-    auto const bestNode = osm::GetBestOsmNode(osmResponse, ms::LatLon(53.8978398, 27.5579251));
-    TEST(bestNode, ());
+    auto const bestNode = osm::GetBestOsmNode(osmResponse, ms::LatLon(53.8977254, 27.5578377));
+    TEST_EQUAL(bestNode.attribute("id").value(), string("277172019"), ());
   }
 }
 
@@ -352,3 +353,120 @@ UNIT_TEST(GetBestOsmRealtion_Test)
   auto const bestWay = osm::GetBestOsmWayOrRelation(osmResponse, geometry);
   TEST_EQUAL(bestWay.attribute("id").value(), string("365808"), ());
 }
+
+char const * const osmResponseBuildingMiss = R"SEP(
+<osm version="0.6" generator="CGImap 0.4.0 (8662 thorn-01.openstreetmap.org)">
+ <bounds minlat="51.5342700" minlon="-0.2047000" maxlat="51.5343200" maxlon="-0.2046300"/>
+ <node id="861357349" visible="true" version="3" changeset="31214483" timestamp="2015-05-16T23:10:03Z" user="Derick Rethans" uid="37137" lat="51.5342451" lon="-0.2046356"/>
+ <node id="3522706827" visible="true" version="1" changeset="31214483" timestamp="2015-05-16T23:09:47Z" user="Derick Rethans" uid="37137" lat="51.5342834" lon="-0.2046544">
+  <tag k="addr:housenumber" v="26a"/>
+  <tag k="addr:street" v="Salusbury Road"/>
+ </node>
+ <node id="3522707171" visible="true" version="1" changeset="31214483" timestamp="2015-05-16T23:09:50Z" user="Derick Rethans" uid="37137" lat="51.5342161" lon="-0.2047884"/>
+ <node id="3522707175" visible="true" version="1" changeset="31214483" timestamp="2015-05-16T23:09:50Z" user="Derick Rethans" uid="37137" lat="51.5342627" lon="-0.2048113"/>
+ <node id="3522707179" visible="true" version="1" changeset="31214483" timestamp="2015-05-16T23:09:50Z" user="Derick Rethans" uid="37137" lat="51.5342918" lon="-0.2046585"/>
+ <node id="3522707180" visible="true" version="1" changeset="31214483" timestamp="2015-05-16T23:09:50Z" user="Derick Rethans" uid="37137" lat="51.5343060" lon="-0.2048326"/>
+ <node id="3522707185" visible="true" version="1" changeset="31214483" timestamp="2015-05-16T23:09:50Z" user="Derick Rethans" uid="37137" lat="51.5343350" lon="-0.2046798"/>
+ <way id="345630057" visible="true" version="3" changeset="38374962" timestamp="2016-04-07T09:19:02Z" user="Derick Rethans" uid="37137">
+  <nd ref="3522707179"/>
+  <nd ref="3522707185"/>
+  <nd ref="3522707180"/>
+  <nd ref="3522707175"/>
+  <nd ref="3522707179"/>
+  <tag k="addr:housenumber" v="26"/>
+  <tag k="addr:street" v="Salusbury Road"/>
+  <tag k="building" v="yes"/>
+  <tag k="building:levels" v="1"/>
+  <tag k="name" v="Londis"/>
+  <tag k="shop" v="convenience"/>
+ </way>
+ <way id="345630019" visible="true" version="2" changeset="38374962" timestamp="2016-04-07T09:19:02Z" user="Derick Rethans" uid="37137">
+  <nd ref="861357349"/>
+  <nd ref="3522706827"/>
+  <nd ref="3522707179"/>
+  <nd ref="3522707175"/>
+  <nd ref="3522707171"/>
+  <nd ref="861357349"/>
+  <tag k="addr:housenumber" v="26"/>
+  <tag k="addr:street" v="Salusbury Road"/>
+  <tag k="building" v="yes"/>
+  <tag k="building:levels" v="2"/>
+  <tag k="name" v="Shampoo Hair Salon"/>
+  <tag k="shop" v="hairdresser"/>
+ </way>
+</osm>
+)SEP";
+
+UNIT_TEST(HouseBuildingMiss_test)
+{
+  pugi::xml_document osmResponse;
+  TEST(osmResponse.load_buffer(osmResponseBuildingMiss, ::strlen(osmResponseBuildingMiss)), ());
+  vector<m2::PointD> const geometry = {
+    {-0.2048121407986514, 60.333984198674443},
+    {-0.20478800091734684,  60.333909096821458},
+    {-0.20465925488366565,  60.334029796228037},
+    {-0.20463511500236109,  60.333954694375052},
+  };
+
+  auto const bestWay = osm::GetBestOsmWayOrRelation(osmResponse, geometry);
+  TEST_EQUAL(bestWay.attribute("id").value(), string("345630019"), ());
+}
+
+string const kHouseWithSeveralEntrances = R"xxx("
+<osm version="0.6" generator="CGImap 0.6.0 (3589 thorn-03.openstreetmap.org)" copyright="OpenStreetMap and contributors" attribution="http://www.openstreetmap.org/copyright" license="http://opendatacommons.org/licenses/odbl/1-0/">
+  <node id="339283610" visible="true" version="6" changeset="33699414" timestamp="2015-08-31T09:53:02Z" user="Lazy Ranma" uid="914471" lat="55.8184397" lon="37.5700770"/>
+  <node id="339283612" visible="true" version="6" changeset="33699414" timestamp="2015-08-31T09:53:02Z" user="Lazy Ranma" uid="914471" lat="55.8184655" lon="37.5702599"/>
+  <node id="339283614" visible="true" version="6" changeset="33699414" timestamp="2015-08-31T09:53:02Z" user="Lazy Ranma" uid="914471" lat="55.8190524" lon="37.5698027"/>
+  <node id="339283615" visible="true" version="6" changeset="33699414" timestamp="2015-08-31T09:53:02Z" user="Lazy Ranma" uid="914471" lat="55.8190782" lon="37.5699856"/>
+  <node id="1131238558" visible="true" version="7" changeset="33699414" timestamp="2015-08-31T09:52:50Z" user="Lazy Ranma" uid="914471" lat="55.8188226" lon="37.5699055">
+    <tag k="entrance" v="yes"/>
+    <tag k="ref" v="2"/>
+  </node>
+  <node id="1131238581" visible="true" version="7" changeset="33699414" timestamp="2015-08-31T09:52:51Z" user="Lazy Ranma" uid="914471" lat="55.8185163" lon="37.5700427">
+    <tag k="entrance" v="yes"/>
+    <tag k="ref" v="4"/>
+  </node>
+  <node id="1131238623" visible="true" version="7" changeset="33699414" timestamp="2015-08-31T09:52:51Z" user="Lazy Ranma" uid="914471" lat="55.8189758" lon="37.5698370">
+    <tag k="entrance" v="yes"/>
+    <tag k="ref" v="1"/>
+  </node>
+  <node id="1131238704" visible="true" version="7" changeset="33699414" timestamp="2015-08-31T09:52:52Z" user="Lazy Ranma" uid="914471" lat="55.8186694" lon="37.5699741">
+    <tag k="entrance" v="yes"/>
+    <tag k="ref" v="3"/>
+  </node>
+  <way id="30680719" visible="true" version="10" changeset="25301783" timestamp="2014-09-08T07:52:43Z" user="Felis Pimeja" uid="260756">
+    <nd ref="339283614"/>
+    <nd ref="339283615"/>
+    <nd ref="339283612"/>
+    <nd ref="339283610"/>
+    <nd ref="1131238581"/>
+    <nd ref="1131238704"/>
+    <nd ref="1131238558"/>
+    <nd ref="1131238623"/>
+    <nd ref="339283614"/>
+    <tag k="addr:city" v="Москва"/>
+    <tag k="addr:country" v="RU"/>
+    <tag k="addr:housenumber" v="14 к1"/>
+    <tag k="addr:street" v="Ивановская улица"/>
+    <tag k="building" v="yes"/>
+  </way>
+</osm>
+)xxx";
+
+UNIT_TEST(HouseWithSeveralEntrances)
+{
+  pugi::xml_document osmResponse;
+  TEST(osmResponse.load_buffer(kHouseWithSeveralEntrances.c_str(),
+                               kHouseWithSeveralEntrances.size()), ());
+
+  vector<m2::PointD> const geometry = {
+    {37.569802534355233, 67.575570401367315},
+    {37.56998492456961, 67.57561599892091},
+    {37.570076119676798, 67.574481424499169},
+    {37.570258509891175, 67.574527022052763}
+  };
+
+  auto const bestWay = osm::GetBestOsmWayOrRelation(osmResponse, geometry);
+  TEST_EQUAL(bestWay.attribute("id").value(), string("30680719"), ());
+}
+}  // namespace

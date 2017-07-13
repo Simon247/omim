@@ -4,8 +4,14 @@ import android.annotation.SuppressLint;
 import android.os.Parcel;
 import android.support.annotation.IntRange;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.text.TextUtils;
 
 import com.mapswithme.maps.Framework;
+import com.mapswithme.maps.ads.Banner;
+import com.mapswithme.maps.ads.LocalAdInfo;
+import com.mapswithme.maps.routing.RoutePointInfo;
+import com.mapswithme.maps.taxi.TaxiManager;
 import com.mapswithme.util.Constants;
 
 // TODO consider refactoring to remove hack with MapObject unmarshalling itself and Bookmark at the same time.
@@ -17,15 +23,24 @@ public class Bookmark extends MapObject
   private int mBookmarkId;
   private double mMerX;
   private double mMerY;
+  @Nullable
+  private final String mObjectTitle;
 
-  Bookmark(@IntRange(from = 0) int categoryId, @IntRange(from = 0) int bookmarkId, String title)
+  public Bookmark(@NonNull String mwmName, long mwmVersion, int featureIndex,
+                  @IntRange(from = 0) int categoryId, @IntRange(from = 0) int bookmarkId,
+                  String title, @Nullable String secondaryTitle, @Nullable String objectTitle,
+                  @Nullable Banner[] banners, @TaxiManager.TaxiType int[] reachableByTaxiTypes,
+                  @Nullable String bookingSearchUrl, @Nullable LocalAdInfo localAdInfo,
+                  @Nullable RoutePointInfo routePointInfo)
   {
-    super(BOOKMARK, title, "", "", 0, 0, "");
+    super(mwmName, mwmVersion, featureIndex, BOOKMARK, title, secondaryTitle, "", "", 0, 0, "",
+          banners, reachableByTaxiTypes, bookingSearchUrl, localAdInfo, routePointInfo);
 
     mCategoryId = categoryId;
     mBookmarkId = bookmarkId;
     mIcon = getIconInternal();
     initXY();
+    mObjectTitle = objectTitle;
   }
 
   private void initXY()
@@ -34,8 +49,8 @@ public class Bookmark extends MapObject
     mMerX = ll.x;
     mMerY = ll.y;
 
-    mLat = Math.toDegrees(2.0 * Math.atan(Math.exp(Math.toRadians(ll.y))) - Math.PI / 2.0);
-    mLon = ll.x;
+    setLat(Math.toDegrees(2.0 * Math.atan(Math.exp(Math.toRadians(ll.y))) - Math.PI / 2.0));
+    setLon(ll.x);
   }
 
   @Override
@@ -44,15 +59,17 @@ public class Bookmark extends MapObject
     super.writeToParcel(dest, flags);
     dest.writeInt(mCategoryId);
     dest.writeInt(mBookmarkId);
+    dest.writeString(mObjectTitle);
   }
 
-  protected Bookmark(Parcel source)
+  protected Bookmark(@MapObjectType int type, Parcel source)
   {
-    super(source);
+    super(type, source);
     mCategoryId = source.readInt();
     mBookmarkId = source.readInt();
     mIcon = getIconInternal();
     initXY();
+    mObjectTitle = source.readString();
   }
 
   @Override
@@ -92,8 +109,10 @@ public class Bookmark extends MapObject
   @Override
   public String getSubtitle()
   {
-    // TODO get correct value
-    return getCategory().getName();
+    String subtitle = getCategoryName();
+    if (!TextUtils.isEmpty(mObjectTitle) && !mTitle.equals(mObjectTitle))
+      subtitle += " - " + mObjectTitle;
+    return subtitle;
   }
 
   public String getCategoryName()
@@ -123,7 +142,8 @@ public class Bookmark extends MapObject
 
     if (!title.equals(getTitle()) || icon != mIcon || !description.equals(getBookmarkDescription()))
     {
-      nativeSetBookmarkParams(mCategoryId, mBookmarkId, title, icon.getType(), description);
+      nativeSetBookmarkParams(mCategoryId, mBookmarkId, title, icon != null ? icon.getType() : "",
+                              description);
       mTitle = title;
     }
   }

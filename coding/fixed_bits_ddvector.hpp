@@ -8,6 +8,7 @@
 
 #include "std/algorithm.hpp"
 #include "std/unique_ptr.hpp"
+#include "std/utility.hpp"
 #include "std/vector.hpp"
 
 
@@ -129,6 +130,8 @@ public:
     TWriter & m_finalWriter;
 
   public:
+    using ValueType = TValue;
+
     explicit Builder(TWriter & writer)
       : m_writer(m_data), m_bits(new TBits(m_writer)), m_finalWriter(writer)
     {

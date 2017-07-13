@@ -22,11 +22,9 @@
 
 namespace search
 {
-
-/// All constants in meters.
-double const DIST_EQUAL_RESULTS = 100.0;
-double const DIST_SAME_STREET = 5000.0;
-
+double const kDistSameStreetMeters = 5000.0;
+char const * const kEmptyRatingSymbol = "-";
+char const * const kPricingSymbol = "$";
 
 void ProcessMetadata(FeatureType const & ft, Result::Metadata & meta)
 {
@@ -52,16 +50,34 @@ void ProcessMetadata(FeatureType const & ft, Result::Metadata & meta)
     meta.m_stars = my::clamp(meta.m_stars, 0, 5);
   else
     meta.m_stars = 0;
+
+  meta.m_isSponsoredBank = ftypes::IsTinkoffChecker::Instance()(ft);
+
+  bool const isSponsoredHotel = ftypes::IsBookingChecker::Instance()(ft);
+  meta.m_isSponsoredHotel = isSponsoredHotel;
+  meta.m_isHotel = ftypes::IsHotelChecker::Instance()(ft);
+
+  if (isSponsoredHotel)
+  {
+    auto const r = src.Get(feature::Metadata::FMD_RATING);
+    char const * const rating = r.empty() ? kEmptyRatingSymbol : r.c_str();
+    meta.m_hotelRating = rating;
+
+    int pricing;
+    if (!strings::to_int(src.Get(feature::Metadata::FMD_PRICE_RATE), pricing))
+      pricing = 0;
+    string pricingStr;
+    CHECK_GREATER_OR_EQUAL(pricing, 0, ("Pricing must be positive!"));
+    for (auto i = 0; i < pricing; i++)
+      pricingStr.append(kPricingSymbol);
+
+    meta.m_hotelApproximatePricing = pricingStr;
+  }
+
   meta.m_isInitialized = true;
 }
 
-namespace impl
-{
-PreResult1::PreResult1(double priority) : m_priority(priority) {}
-
-PreResult1::PreResult1(FeatureID const & fID, double priority, int8_t viewportID,
-                       v2::PreRankingInfo const & info)
-  : m_id(fID), m_priority(priority), m_viewportID(viewportID), m_info(info)
+PreResult1::PreResult1(FeatureID const & fID, PreRankingInfo const & info) : m_id(fID), m_info(info)
 {
   ASSERT(m_id.IsValid(), ());
 }
@@ -71,20 +87,19 @@ bool PreResult1::LessRank(PreResult1 const & r1, PreResult1 const & r2)
 {
   if (r1.m_info.m_rank != r2.m_info.m_rank)
     return r1.m_info.m_rank > r2.m_info.m_rank;
-  return r1.m_priority < r2.m_priority;
+  return r1.m_info.m_distanceToPivot < r2.m_info.m_distanceToPivot;
 }
 
 // static
-bool PreResult1::LessPriority(PreResult1 const & r1, PreResult1 const & r2)
+bool PreResult1::LessDistance(PreResult1 const & r1, PreResult1 const & r2)
 {
-  if (r1.m_priority != r2.m_priority)
-    return r1.m_priority < r2.m_priority;
+  if (r1.m_info.m_distanceToPivot != r2.m_info.m_distanceToPivot)
+    return r1.m_info.m_distanceToPivot < r2.m_info.m_distanceToPivot;
   return r1.m_info.m_rank > r2.m_info.m_rank;
 }
 
-PreResult2::PreResult2(FeatureType const & f, PreResult1 const * p, m2::PointD const & center,
-                       m2::PointD const & pivot, string const & displayName,
-                       string const & fileName)
+PreResult2::PreResult2(FeatureType const & f, m2::PointD const & center, m2::PointD const & pivot,
+                       string const & displayName, string const & fileName)
   : m_id(f.GetID())
   , m_types(f)
   , m_str(displayName)
@@ -103,8 +118,7 @@ PreResult2::PreResult2(FeatureType const & f, PreResult1 const * p, m2::PointD c
 }
 
 PreResult2::PreResult2(double lat, double lon)
-  : m_str("(" + MeasurementUtils::FormatLatLon(lat, lon) + ")"),
-    m_resultType(RESULT_LATLON)
+  : m_str("(" + measurement_utils::FormatLatLon(lat, lon) + ")"), m_resultType(RESULT_LATLON)
 {
   m_region.SetParams(string(), MercatorBounds::FromLatLon(lat, lon));
 }
@@ -179,12 +193,18 @@ Result PreResult2::GenerateFinalResult(storage::CountryInfoGetter const & infoGe
                                        set<uint32_t> const * pTypes, int8_t locale,
                                        ReverseGeocoder const * coder) const
 {
+  ReverseGeocoder::Address addr;
+  bool addrComputed = false;
+
   string name = m_str;
   if (coder && name.empty())
   {
     // Insert exact address (street and house number) instead of empty result name.
-    ReverseGeocoder::Address addr;
-    coder->GetNearbyAddress(GetCenter(), addr);
+    if (!addrComputed)
+    {
+      coder->GetNearbyAddress(GetCenter(), addr);
+      addrComputed = true;
+    }
     if (addr.GetDistance() == 0)
       name = FormatStreetAndHouse(addr);
   }
@@ -198,8 +218,11 @@ Result PreResult2::GenerateFinalResult(storage::CountryInfoGetter const & infoGe
     address = GetRegionName(infoGetter, type);
     if (ftypes::IsAddressObjectChecker::Instance()(m_types))
     {
-      ReverseGeocoder::Address addr;
-      coder->GetNearbyAddress(GetCenter(), addr);
+      if (!addrComputed)
+      {
+        coder->GetNearbyAddress(GetCenter(), addr);
+        addrComputed = true;
+      }
       address = FormatFullAddress(addr, address);
     }
   }
@@ -208,24 +231,25 @@ Result PreResult2::GenerateFinalResult(storage::CountryInfoGetter const & infoGe
   {
   case RESULT_FEATURE:
   case RESULT_BUILDING:
-    return Result(m_id, GetCenter(), name, address, pCat->GetReadableFeatureType(type, locale)
-              #ifdef DEBUG
-                  + ' ' + strings::to_string(static_cast<int>(m_info.m_rank))
-              #endif
-                  , type, m_metadata);
-
+    return Result(m_id, GetCenter(), name, address, pCat->GetReadableFeatureType(type, locale),
+                  type, m_metadata);
   default:
     ASSERT_EQUAL(m_resultType, RESULT_LATLON, ());
     return Result(GetCenter(), name, address);
   }
 }
 
-bool PreResult2::StrictEqualF::operator() (PreResult2 const & r) const
+PreResult2::StrictEqualF::StrictEqualF(PreResult2 const & r, double const epsMeters)
+  : m_r(r), m_epsMeters(epsMeters)
+{
+}
+
+bool PreResult2::StrictEqualF::operator()(PreResult2 const & r) const
 {
   if (m_r.m_resultType == r.m_resultType && m_r.m_resultType == RESULT_FEATURE)
   {
     if (m_r.IsEqualCommon(r))
-      return (PointDistance(m_r.GetCenter(), r.GetCenter()) < DIST_EQUAL_RESULTS);
+      return PointDistance(m_r.GetCenter(), r.GetCenter()) < m_epsMeters;
   }
 
   return false;
@@ -245,39 +269,36 @@ bool PreResult2::LessLinearTypesF::operator() (PreResult2 const & r1, PreResult2
     return (t1 < t2);
 
   // Should stay the best feature, after unique, so add this criteria:
-  return (r1.m_distance < r2.m_distance);
+  return r1.m_distance < r2.m_distance;
 }
 
 bool PreResult2::EqualLinearTypesF::operator() (PreResult2 const & r1, PreResult2 const & r2) const
 {
   // Note! Do compare for distance when filtering linear objects.
   // Otherwise we will skip the results for different parts of the map.
-  return (r1.m_geomType == feature::GEOM_LINE &&
-          r1.IsEqualCommon(r2) &&
-          PointDistance(r1.GetCenter(), r2.GetCenter()) < DIST_SAME_STREET);
+  return r1.m_geomType == feature::GEOM_LINE && r1.IsEqualCommon(r2) &&
+         PointDistance(r1.GetCenter(), r2.GetCenter()) < kDistSameStreetMeters;
 }
 
 bool PreResult2::IsEqualCommon(PreResult2 const & r) const
 {
-  return (m_geomType == r.m_geomType &&
-          GetBestType() == r.GetBestType() &&
-          m_str == r.m_str);
+  return m_geomType == r.m_geomType && GetBestType() == r.GetBestType() && m_str == r.m_str;
 }
 
 bool PreResult2::IsStreet() const
 {
-  return (m_geomType == feature::GEOM_LINE &&
-          ftypes::IsStreetChecker::Instance()(m_types));
+  return m_geomType == feature::GEOM_LINE && ftypes::IsStreetChecker::Instance()(m_types);
 }
 
 string PreResult2::DebugPrint() const
 {
   stringstream ss;
-  ss << "{ IntermediateResult: " <<
-        "Name: " << m_str <<
-        "; Type: " << GetBestType() <<
-        "; Rank: " << static_cast<int>(m_info.m_rank) <<
-        "; Distance: " << m_distance << " }";
+  ss << "IntermediateResult [ "
+     << "Name: " << m_str
+     << "; Type: " << GetBestType()
+     << "; Ranking info: " << search::DebugPrint(m_info)
+     << "; Linear model rank: " << m_info.GetLinearModelRank()
+     << " ]";
   return ss.str();
 }
 
@@ -307,5 +328,4 @@ void PreResult2::RegionInfo::GetRegion(storage::CountryInfoGetter const & infoGe
   else
     infoGetter.GetRegionInfo(m_point, info);
 }
-}  // namespace search::impl
 }  // namespace search

@@ -8,6 +8,8 @@
 
 #include "base/macros.hpp"
 
+#include "indexer/feature_meta.hpp"
+
 #include "std/atomic.hpp"
 #include "std/deque.hpp"
 #include "std/map.hpp"
@@ -24,8 +26,8 @@
 class MwmInfo
 {
 public:
-  friend class MwmSet;
   friend class Index;
+  friend class MwmSet;
 
   enum MwmTypeT
   {
@@ -66,10 +68,12 @@ public:
 
   MwmTypeT GetType() const;
 
+  inline feature::RegionData const & GetRegionData() const { return m_data; }
+
   /// Returns the lock counter value for test needs.
   uint8_t GetNumRefs() const { return m_numRefs; }
 
-private:
+protected:
   inline Status SetStatus(Status status)
   {
     Status result = m_status;
@@ -77,9 +81,11 @@ private:
     return result;
   }
 
+  feature::RegionData m_data;
+
   platform::LocalCountryFile m_file;  ///< Path to the mwm file.
   atomic<Status> m_status;            ///< Current country status.
-  uint8_t m_numRefs;                  ///< Number of active handles.
+  uint32_t m_numRefs;                 ///< Number of active handles.
 };
 
 class MwmSet
@@ -112,10 +118,7 @@ public:
   };
 
 public:
-  // Default value 32=2^5 was from the very begining.
-  // Later, we replaced my::Cache with the std::deque, but forgot to change
-  // logarithm constant 5 with actual size 32. Now it's fixed.
-  explicit MwmSet(size_t cacheSize = 32) : m_cacheSize(cacheSize) {}
+  explicit MwmSet(size_t cacheSize = 64) : m_cacheSize(cacheSize) {}
   virtual ~MwmSet() = default;
 
   class MwmValueBase
@@ -232,15 +235,16 @@ public:
 
     // Called when a map is registered for a first time and can be
     // used.
-    virtual void OnMapRegistered(platform::LocalCountryFile const & localFile) {}
+    virtual void OnMapRegistered(platform::LocalCountryFile const & /*localFile*/) {}
 
     // Called when a map is updated to a newer version. Feel free to
     // treat it as combined OnMapRegistered(newFile) +
-    // OnMapRegistered(oldFile).
-    virtual void OnMapUpdated(platform::LocalCountryFile const & newFile, platform::LocalCountryFile const & oldFile) {}
+    // OnMapDeregistered(oldFile).
+    virtual void OnMapUpdated(platform::LocalCountryFile const & /*newFile*/,
+                              platform::LocalCountryFile const & /*oldFile*/) {}
 
     // Called when a map is deregistered and can no longer be used.
-    virtual void OnMapDeregistered(platform::LocalCountryFile const & localFile) {}
+    virtual void OnMapDeregistered(platform::LocalCountryFile const & /*localFile*/) {}
   };
 
   /// Registers a new map.

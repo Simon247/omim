@@ -6,7 +6,12 @@
 #include "routing/turns.hpp"
 #include "routing/turns_notification_manager.hpp"
 
+#include "traffic/speed_groups.hpp"
+#include "traffic/traffic_cache.hpp"
+#include "traffic/traffic_info.hpp"
+
 #include "platform/location.hpp"
+#include "platform/measurement_utils.hpp"
 
 #include "geometry/point2d.hpp"
 #include "geometry/polyline2d.hpp"
@@ -15,6 +20,8 @@
 
 #include "std/atomic.hpp"
 #include "std/limits.hpp"
+#include "std/map.hpp"
+#include "std/shared_ptr.hpp"
 #include "std/unique_ptr.hpp"
 
 namespace location
@@ -33,8 +40,10 @@ struct SpeedCameraRestriction
   SpeedCameraRestriction() : m_index(0), m_maxSpeedKmH(numeric_limits<uint8_t>::max()) {}
 };
 
-class RoutingSession
+class RoutingSession : public traffic::TrafficObserver, public traffic::TrafficCache
 {
+  friend void UnitTest_TestFollowRoutePercentTest();
+
 public:
   enum State
   {
@@ -45,13 +54,16 @@ public:
     OnRoute,           // user follows the route
     RouteNeedRebuild,  // user left the route
     RouteFinished,     // destination point is reached but the session isn't closed
-    RouteNoFollowing   // route is built but following mode has been disabled
+    RouteNoFollowing,  // route is built but following mode has been disabled
+    RouteRebuilding,   // we requested a route rebuild and wait when it will be rebuilded
   };
 
   /*
    * RoutingNotActive -> RouteBuilding    // start route building
-   * RouteBuilding -> RouteNotReady       // waiting for route
-   * RouteBuilding -> RouteNotStarted     // route is builded
+   * RouteBuilding -> RouteNotReady       // waiting for route in case of building a new route
+   * RouteBuilding -> RouteNotStarted     // route is builded in case of building a new route
+   * RouteRebuilding -> RouteNotReady     // waiting for route in case of rebuilding
+   * RouteRebuilding -> RouteNotStarted   // route is builded in case of rebuilding
    * RouteNotStarted -> OnRoute           // user started following the route
    * RouteNotStarted -> RouteNeedRebuild  // user doesn't like the route.
    * OnRoute -> RouteNeedRebuild          // user moves away from route - need to rebuild
@@ -65,6 +77,7 @@ public:
 
   typedef function<void(Route const &, IRouter::ResultCode)> TReadyCallback;
   typedef function<void(float)> TProgressCallback;
+  typedef function<void(size_t passedCheckpointIdx)> CheckpointCallback;
 
   RoutingSession();
 
@@ -73,30 +86,50 @@ public:
 
   void SetRouter(unique_ptr<IRouter> && router, unique_ptr<OnlineAbsentCountriesFetcher> && fetcher);
 
-  /// @param[in] startPoint and endPoint in mercator
+  /// @param[in] checkpoints in mercator
   /// @param[in] timeoutSec timeout in seconds, if zero then there is no timeout
-  void BuildRoute(m2::PointD const & startPoint, m2::PointD const & endPoint,
-                  TReadyCallback const & readyCallback,
-                  TProgressCallback const & progressCallback, uint32_t timeoutSec);
+  void BuildRoute(Checkpoints const & checkpoints,
+                  uint32_t timeoutSec);
   void RebuildRoute(m2::PointD const & startPoint, TReadyCallback const & readyCallback,
-                    TProgressCallback const & progressCallback, uint32_t timeoutSec);
+                    uint32_t timeoutSec, State routeRebuildingState, bool adjustToPrevRoute);
 
-  m2::PointD GetEndPoint() const { return m_endPoint; }
+  m2::PointD GetEndPoint() const { return m_checkpoints.GetFinish(); }
   bool IsActive() const { return (m_state != RoutingNotActive); }
   bool IsNavigable() const { return (m_state == RouteNotStarted || m_state == OnRoute || m_state == RouteFinished); }
-  bool IsBuilt() const { return (IsNavigable() || m_state == RouteNeedRebuild || m_state == RouteFinished); }
-  bool IsBuilding() const { return (m_state == RouteBuilding); }
+  bool IsBuilt() const { return (IsNavigable() || m_state == RouteNeedRebuild); }
+  /// \returns true if a new route is in process of building rebuilding or
+  /// if a route is being rebuilt in case the user left the route, and false otherwise.
+  bool IsBuilding() const { return (m_state == RouteBuilding || m_state == RouteRebuilding); }
+  bool IsBuildingOnly() const { return m_state == RouteBuilding; }
+  bool IsRebuildingOnly() const { return m_state == RouteRebuilding; }
+  bool IsNotReady() const { return m_state == RouteNotReady; }
+  bool IsFinished() const { return m_state == RouteFinished; }
+  bool IsNoFollowing() const { return m_state == RouteNoFollowing; }
   bool IsOnRoute() const { return (m_state == OnRoute); }
   bool IsFollowing() const { return m_isFollowing; }
   void Reset();
 
-  Route const & GetRoute() const { return m_route; }
+  inline void SetState(State state) { m_state = state; }
+
+  shared_ptr<Route> const GetRoute() const;
+  /// \returns true if altitude information along |m_route| is available and
+  /// false otherwise.
+  bool HasRouteAltitude() const;
+
+  /// \brief copies distance from route beginning to ends of route segments in meters and
+  /// route altitude information to |routeSegDistanceM| and |routeAltitudes|.
+  /// \returns true if there is valid route information. If the route is not valid returns false.
+  bool GetRouteAltitudesAndDistancesM(vector<double> & routeSegDistanceM,
+                                      feature::TAltitudes & routeAltitudesM) const;
 
   State OnLocationPositionChanged(location::GpsInfo const & info, Index const & index);
   void GetRouteFollowingInfo(location::FollowingInfo & info) const;
 
   void MatchLocationToRoute(location::GpsInfo & location,
                             location::RouteMatchingInfo & routeMatchingInfo) const;
+  // Get traffic speed for the current route position.
+  // Returns SpeedGroup::Unknown if any trouble happens: position doesn't match with route or something else.
+  traffic::SpeedGroup MatchTraffic(location::RouteMatchingInfo const & routeMatchingInfo) const;
 
   void SetUserCurrentPosition(m2::PointD const & position);
   m2::PointD const & GetUserCurrentPosition() const;
@@ -113,17 +146,29 @@ public:
   bool EnableFollowMode();
 
   void SetRoutingSettings(RoutingSettings const & routingSettings);
+  void SetReadyCallbacks(TReadyCallback const & buildReadyCallback,
+                         TReadyCallback const & rebuildReadyCallback);
+  void SetProgressCallback(TProgressCallback const & progressCallback);
+  void SetCheckpointCallback(CheckpointCallback const & checkpointCallback);
 
   // Sound notifications for turn instructions.
   void EnableTurnNotifications(bool enable);
   bool AreTurnNotificationsEnabled() const;
-  void SetTurnNotificationsUnits(settings::Units const units);
+  void SetTurnNotificationsUnits(measurement_utils::Units const units);
   void SetTurnNotificationsLocale(string const & locale);
   string GetTurnNotificationsLocale() const;
   void GenerateTurnNotifications(vector<string> & turnNotifications);
-  double GetCompletionPercent() const;
 
   void EmitCloseRoutingEvent() const;
+
+  // RoutingObserver overrides:
+  void OnTrafficInfoClear() override;
+  void OnTrafficInfoAdded(traffic::TrafficInfo && info) override;
+  void OnTrafficInfoRemoved(MwmSet::MwmId const & mwmId) override;
+
+  // TrafficCache overrides:
+  shared_ptr<traffic::TrafficInfo::Coloring> GetTrafficInfo(MwmSet::MwmId const & mwmId) const override;
+  void CopyTraffic(std::map<MwmSet::MwmId, std::shared_ptr<traffic::TrafficInfo::Coloring>> & trafficColoring) const override;
 
 private:
   struct DoReadyCallback
@@ -150,13 +195,17 @@ private:
   /// RemoveRoute removes m_route and resets route attributes (m_state, m_lastDistance, m_moveAwayCounter).
   void RemoveRoute();
   void RemoveRouteImpl();
+  void RebuildRouteOnTrafficUpdate();
+
+  bool HasRouteAltitudeImpl() const;
+  double GetCompletionPercent() const;
 
 private:
   unique_ptr<AsyncRouter> m_router;
-  Route m_route;
+  shared_ptr<Route> m_route;
   atomic<State> m_state;
   atomic<bool> m_isFollowing;
-  m2::PointD m_endPoint;
+  Checkpoints m_checkpoints;
   size_t m_lastWarnedSpeedCameraIndex;
   SpeedCameraRestriction m_lastFoundCamera;
   // Index of a last point on a route checked for a speed camera.
@@ -167,7 +216,7 @@ private:
   /// about camera will be sent at most once.
   mutable bool m_speedWarningSignal;
 
-  mutable threads::Mutex m_routeSessionMutex;
+  mutable threads::Mutex m_routingSessionMutex;
 
   /// Current position metrics to check for RouteNeedRebuild state.
   double m_lastDistance;
@@ -180,6 +229,11 @@ private:
 
   RoutingSettings m_routingSettings;
 
+  TReadyCallback m_buildReadyCallback;
+  TReadyCallback m_rebuildReadyCallback;
+  TProgressCallback m_progressCallback;
+  CheckpointCallback m_checkpointCallback;
+
   // Statistics parameters
   // Passed distance on route including reroutes
   double m_passedDistanceOnRouteMeters;
@@ -187,4 +241,6 @@ private:
   int m_routingRebuildCount;
   mutable double m_lastCompletionPercent;
 };
+
+string DebugPrint(RoutingSession::State state);
 }  // namespace routing

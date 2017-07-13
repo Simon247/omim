@@ -7,61 +7,29 @@
 #include "base/logging.hpp"
 #include "base/stl_add.hpp"
 
-#include "std/algorithm.hpp"
+#include <algorithm>
 
 
-string Platform::UniqueClientId() const
+std::string Platform::UniqueClientId() const
 {
-  string res;
-  if (!settings::Get("UniqueClientID", res))
-  {
-    JNIEnv * env = jni::GetEnv();
-    if (!env)
-      return string();
-
-    jclass uuidClass = env->FindClass("java/util/UUID");
-    ASSERT(uuidClass, ("Can't find java class java/util/UUID"));
-
-    jmethodID randomUUIDId = env->GetStaticMethodID(uuidClass, "randomUUID", "()Ljava/util/UUID;");
-    ASSERT(randomUUIDId, ("Can't find static java/util/UUID.randomUUIDId() method"));
-
-    jobject uuidInstance = env->CallStaticObjectMethod(uuidClass, randomUUIDId);
-    ASSERT(uuidInstance, ("UUID.randomUUID() returned NULL"));
-
-    jmethodID toStringId = env->GetMethodID(uuidClass, "toString", "()Ljava/lang/String;");
-    ASSERT(toStringId, ("Can't find java/util/UUID.toString() method"));
-
-    jstring uuidString = (jstring)env->CallObjectMethod(uuidInstance, toStringId);
-    ASSERT(uuidString, ("UUID.toString() returned NULL"));
-
-    char const * uuidUtf8 = env->GetStringUTFChars(uuidString, 0);
-
-    if (uuidUtf8 != 0)
-    {
-      res = uuidUtf8;
-      env->ReleaseStringUTFChars(uuidString, uuidUtf8);
-    }
-
-    res = HashUniqueID(res);
-
-    settings::Set("UniqueClientID", res);
-  }
-
-  return res;
+  JNIEnv * env = jni::GetEnv();
+  static jmethodID const getInstallationId = jni::GetStaticMethodID(env, g_utilsClazz, "getInstallationId",
+                                                                    "()Ljava/lang/String;");
+  static jstring const installationId = (jstring)env->CallStaticObjectMethod(g_utilsClazz, getInstallationId);
+  static std::string const result = jni::ToNativeString(env, installationId);
+  return result;
 }
 
-string Platform::GetMemoryInfo() const
+std::string Platform::GetMemoryInfo() const
 {
   JNIEnv * env = jni::GetEnv();
   if (env == nullptr)
-    return string();
+    return std::string();
 
   static shared_ptr<jobject> classMemLogging = jni::make_global_ref(env->FindClass("com/mapswithme/util/log/MemLogging"));
   ASSERT(classMemLogging, ());
 
-  static jmethodID const getMemoryInfoId = env->GetStaticMethodID(static_cast<jclass>(*classMemLogging), "getMemoryInfo", "()Ljava/lang/String;");
-  ASSERT(getMemoryInfoId, ());
-
+  static jmethodID const getMemoryInfoId = jni::GetStaticMethodID(env, static_cast<jclass>(*classMemLogging), "getMemoryInfo", "()Ljava/lang/String;");
   jstring const memInfoString = (jstring)env->CallStaticObjectMethod(static_cast<jclass>(*classMemLogging), getMemoryInfoId);
   ASSERT(memInfoString, ());
 
@@ -82,10 +50,24 @@ Platform::EConnectionType Platform::ConnectionStatus()
   static shared_ptr<jobject> clazzConnectionState = jni::make_global_ref(env->FindClass("com/mapswithme/util/ConnectionState"));
   ASSERT(clazzConnectionState, ());
 
-  static jmethodID const getConnectionMethodId = env->GetStaticMethodID(static_cast<jclass>(*clazzConnectionState), "getConnectionState", "()B");
-  ASSERT(getConnectionMethodId, ());
-
+  static jmethodID const getConnectionMethodId = jni::GetStaticMethodID(env, static_cast<jclass>(*clazzConnectionState), "getConnectionState", "()B");
   return static_cast<Platform::EConnectionType>(env->CallStaticByteMethod(static_cast<jclass>(*clazzConnectionState), getConnectionMethodId));
+}
+
+Platform::ChargingStatus Platform::GetChargingStatus()
+{
+  JNIEnv * env = jni::GetEnv();
+  if (env == nullptr)
+    return Platform::ChargingStatus::Unknown;
+
+  static jclass const clazzBatteryState =
+      jni::GetGlobalClassRef(env, "com/mapswithme/util/BatteryState");
+  ASSERT(clazzBatteryState, ());
+
+  static jmethodID const getChargingMethodId =
+      jni::GetStaticMethodID(env, clazzBatteryState, "getChargingStatus", "()I");
+  return static_cast<Platform::ChargingStatus>(
+      env->CallStaticIntMethod(clazzBatteryState, getChargingMethodId));
 }
 
 namespace android
@@ -95,14 +77,16 @@ namespace android
                             jstring apkPath, jstring storagePath,
                             jstring tmpPath, jstring obbGooglePath,
                             jstring flavorName, jstring buildType,
-                            bool isYota, bool isTablet)
+                            bool isTablet)
   {
     m_functorProcessObject = env->NewGlobalRef(functorProcessObject);
     jclass const functorProcessClass = env->GetObjectClass(functorProcessObject);
     m_functorProcessMethod = env->GetMethodID(functorProcessClass, "forwardToMainThread", "(J)V");
+    m_sendPushWooshTagsMethod = env->GetMethodID(functorProcessClass, "sendPushWooshTags", "(Ljava/lang/String;[Ljava/lang/String;)V");
+    m_myTrackerTrackMethod = env->GetStaticMethodID(g_myTrackerClazz, "trackEvent", "(Ljava/lang/String;)V");
 
-    string const flavor = jni::ToNativeString(env, flavorName);
-    string const build = jni::ToNativeString(env, buildType);
+    std::string const flavor = jni::ToNativeString(env, flavorName);
+    std::string const build = jni::ToNativeString(env, buildType);
     LOG(LINFO, ("Flavor name:", flavor));
     LOG(LINFO, ("Build type name:", build));
 
@@ -117,17 +101,10 @@ namespace android
 
     m_isTablet = isTablet;
     m_resourcesDir = jni::ToNativeString(env, apkPath);
-    // Settings file should be in a one place always (default external storage).
-    m_settingsDir = jni::ToNativeString(env, storagePath);
     m_tmpDir = jni::ToNativeString(env, tmpPath);
+    m_writableDir = jni::ToNativeString(env, storagePath);
 
-    if (!settings::Get("StoragePath", m_writableDir) || !HasAvailableSpaceForWriting(1024))
-    {
-      LOG(LINFO, ("Could not read writable dir. Use primary storage."));
-      m_writableDir = m_settingsDir;
-    }
-
-    string const obbPath = jni::ToNativeString(env, obbGooglePath);
+    std::string const obbPath = jni::ToNativeString(env, obbGooglePath);
     Platform::FilesList files;
     GetFilesByExt(obbPath, ".obb", files);
     m_extResFiles.clear();
@@ -137,7 +114,6 @@ namespace android
     LOG(LINFO, ("Apk path = ", m_resourcesDir));
     LOG(LINFO, ("Writable path = ", m_writableDir));
     LOG(LINFO, ("Temporary path = ", m_tmpDir));
-    LOG(LINFO, ("Settings path = ", m_settingsDir));
     LOG(LINFO, ("OBB Google path = ", obbPath));
     LOG(LINFO, ("OBB Google files = ", files));
 
@@ -156,7 +132,7 @@ namespace android
   {
   }
 
-  string Platform::GetStoragePathPrefix() const
+  std::string Platform::GetStoragePathPrefix() const
   {
     size_t const count = m_writableDir.size();
     ASSERT_GREATER ( count, 2, () );
@@ -167,10 +143,17 @@ namespace android
     return m_writableDir.substr(0, i);
   }
 
-  void Platform::SetStoragePath(string const & path)
+  void Platform::SetWritableDir(std::string const & dir)
   {
-    m_writableDir = path;
+    m_writableDir = dir;
     settings::Set("StoragePath", m_writableDir);
+    LOG(LINFO, ("Writable path = ", m_writableDir));
+  }
+
+  void Platform::SetSettingsDir(std::string const & dir)
+  {
+    m_settingsDir = dir;
+    LOG(LINFO, ("Settings path = ", m_settingsDir));
   }
 
   bool Platform::HasAvailableSpaceForWriting(uint64_t size) const
@@ -190,7 +173,30 @@ namespace android
     TFunctor * functor = new TFunctor(fn);
     jni::GetEnv()->CallVoidMethod(m_functorProcessObject, m_functorProcessMethod, reinterpret_cast<jlong>(functor));
   }
-}
+
+  void Platform::SendPushWooshTag(std::string const & tag, std::vector<std::string> const & values)
+  {
+    if (values.empty())
+      return;
+
+    JNIEnv * env = jni::GetEnv();
+    env->CallVoidMethod(m_functorProcessObject, m_sendPushWooshTagsMethod,
+                        jni::TScopedLocalRef(env, jni::ToJavaString(env, tag)).get(),
+                        jni::TScopedLocalObjectArrayRef(env, jni::ToJavaStringArray(env, values)).get());
+  }
+
+  void Platform::SendMarketingEvent(std::string const & tag, std::map<std::string, std::string> const & params)
+  {
+    JNIEnv * env = jni::GetEnv();
+    std::string eventData = tag;
+    for (auto const & item : params)
+      eventData.append("_" + item.first + "_" + item.second);
+
+    env->CallStaticVoidMethod(g_myTrackerClazz, m_myTrackerTrackMethod,
+                              jni::TScopedLocalRef(env, jni::ToJavaString(env, eventData)).get());
+  }
+
+} // namespace android
 
 Platform & GetPlatform()
 {

@@ -384,7 +384,10 @@ France;Q142;fr;fr
  French Polynesia;Q30971;;fr
  Wallis and Futuna;Q35555
 Gabon;Q1000;ga;fr
-Georgia;Q230;ge;ka
+Georgia Region;Q230;ge;ka
+ Georgia;Q230;ge;ka
+ Abkhazia;Q23334;;ab,ru
+ South Ossetia;Q23427;;ru,ka,os
 Germany;Q183;de;de
  Germany_Baden-Wurttemberg;Q985
   Germany_Baden-Wurttemberg_Regierungsbezirk Freiburg;Q2833
@@ -611,6 +614,7 @@ Japan;Q17;jp;ja
   Japan_Kanto_Tochigi;Q44843
   Japan_Kanto_Tokyo;Q1490
  Japan_Kinki Region;Q164256
+  Japan_Shikoku Region_Kyoto;Q120730
   Japan_Kinki Region_Mie;Q128196
   Japan_Kinki Region_Nara;Q131287
   Japan_Kinki Region_Osaka_Osaka;Q35765
@@ -629,7 +633,6 @@ Japan;Q17;jp;ja
   Japan_Shikoku Region_Ehime;Q123376
   Japan_Shikoku Region_Kagawa;Q161454
   Japan_Shikoku Region_Kochi;Q134093
-  Japan_Shikoku Region_Kyoto;Q120730
   Japan_Shikoku Region_Tokushima;Q160734
  Japan_Tohoku;Q129465
   Japan_Tohoku_Akita;Q81863
@@ -1063,9 +1066,9 @@ Ukraine;Q212;ua;uk
  Ukraine_Zhytomyr Oblast;Q40637
  Crimea;Q7835
 United Arab Emirates;Q878;ae;ar
+Falkland Islands;Q9648
 United Kingdom;Q145;gb;en
  British Indian Ocean Territory;Q43448
- Falkland Islands;Q9648
  UK_England_East Midlands;Q47994
  UK_England_East of England_Essex;Q48006-Q23240
  UK_England_East of England_Norfolk;Q48006-Q23109

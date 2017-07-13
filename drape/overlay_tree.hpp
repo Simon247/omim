@@ -1,5 +1,6 @@
 #pragma once
 
+#include "drape/drape_diagnostics.hpp"
 #include "drape/overlay_handle.hpp"
 
 #include "geometry/screenbase.hpp"
@@ -13,12 +14,8 @@
 
 namespace dp
 {
-
-//#define COLLECT_DISPLACEMENT_INFO
-
 namespace detail
 {
-
 struct OverlayTraits
 {
   ScreenBase m_modelView;
@@ -38,8 +35,7 @@ struct OverlayHasher
     return m_hasher(handle.get());
   }
 };
-
-}
+}  // namespace detail
 
 using TOverlayContainer = buffer_vector<ref_ptr<OverlayHandle>, 8>;
 
@@ -48,8 +44,11 @@ class OverlayTree : public m4::Tree<ref_ptr<OverlayHandle>, detail::OverlayTrait
   using TBase = m4::Tree<ref_ptr<OverlayHandle>, detail::OverlayTraits>;
 
 public:
+  using HandlesCache = unordered_set<ref_ptr<OverlayHandle>, detail::OverlayHasher>;
+
   OverlayTree();
 
+  void Clear();
   bool Frame();
   bool IsNeedUpdate() const;
 
@@ -58,41 +57,48 @@ public:
   void Remove(ref_ptr<OverlayHandle> handle);
   void EndOverlayPlacing();
 
+  HandlesCache const & GetHandlesCache() const { return m_handlesCache; }
+
   void Select(m2::RectD const & rect, TOverlayContainer & result) const;
   void Select(m2::PointD const & glbPoint, TOverlayContainer & result) const;
 
-  void SetFollowingMode(bool mode);
+  void SetDisplacementEnabled(bool enabled);
 
-#ifdef COLLECT_DISPLACEMENT_INFO
+  void SetSelectedFeature(FeatureID const & featureID);
+  bool GetSelectedFeatureRect(ScreenBase const & screen, m2::RectD & featureRect);
+
   struct DisplacementData
   {
     m2::PointF m_arrowStart;
     m2::PointF m_arrowEnd;
     dp::Color m_arrowColor;
-    DisplacementData(m2::PointF const & arrowStart, m2::PointF const & arrowEnd, dp::Color const & arrowColor)
+    DisplacementData(m2::PointF const & arrowStart, m2::PointF const & arrowEnd,
+                     dp::Color const & arrowColor)
       : m_arrowStart(arrowStart), m_arrowEnd(arrowEnd), m_arrowColor(arrowColor)
     {}
   };
-  using TDisplacementInfo = vector<DisplacementData>;
+  using TDisplacementInfo = std::vector<DisplacementData>;
   TDisplacementInfo const & GetDisplacementInfo() const;
-#endif
 
 private:
   ScreenBase const & GetModelView() const { return m_traits.m_modelView; }
-  void InsertHandle(ref_ptr<OverlayHandle> handle,
+  void InsertHandle(ref_ptr<OverlayHandle> handle, int currentRank,
                     ref_ptr<OverlayHandle> const & parentOverlay);
   bool CheckHandle(ref_ptr<OverlayHandle> handle, int currentRank,
                    ref_ptr<OverlayHandle> & parentOverlay) const;
   void DeleteHandle(ref_ptr<OverlayHandle> const & handle);
 
+  ref_ptr<OverlayHandle> FindParent(ref_ptr<OverlayHandle> handle, int searchingRank) const;
+  void DeleteHandleWithParents(ref_ptr<OverlayHandle> handle, int currentRank);
+
   int m_frameCounter;
   array<vector<ref_ptr<OverlayHandle>>, dp::OverlayRanksCount> m_handles;
-  unordered_set<ref_ptr<OverlayHandle>, detail::OverlayHasher> m_handlesCache;
-  bool m_followingMode;
+  HandlesCache m_handlesCache;
 
-#ifdef COLLECT_DISPLACEMENT_INFO
+  bool m_isDisplacementEnabled;
+
+  FeatureID m_selectedFeatureID;
+
   TDisplacementInfo m_displacementInfo;
-#endif
 };
-
-} // namespace dp
+}  // namespace dp

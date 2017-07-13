@@ -15,13 +15,13 @@
 
 namespace dp
 {
-
 class GlyphPacker
 {
 public:
   GlyphPacker(m2::PointU const & size);
 
   bool PackGlyph(uint32_t width, uint32_t height, m2::RectU & rect);
+  bool CanBePacked(uint32_t glyphsCount, uint32_t width, uint32_t height) const;
   m2::RectF MapTextureCoords(m2::RectU const & pixelRect) const;
   bool IsFull() const;
 
@@ -35,13 +35,25 @@ private:
 class GlyphKey : public Texture::Key
 {
 public:
-  GlyphKey(strings::UniChar unicodePoint) : m_unicodePoint(unicodePoint) {}
+  GlyphKey(strings::UniChar unicodePoint, int fixedSize)
+    : m_unicodePoint(unicodePoint)
+    , m_fixedSize(fixedSize)
+  {}
 
   Texture::ResourceType GetType() const { return Texture::Glyph; }
   strings::UniChar GetUnicodePoint() const { return m_unicodePoint; }
+  int GetFixedSize() const { return m_fixedSize; }
+
+  bool operator<(GlyphKey const & g) const
+  {
+    if (m_unicodePoint == g.m_unicodePoint)
+      return m_fixedSize < g.m_fixedSize;
+    return m_unicodePoint < g.m_unicodePoint;
+  }
 
 private:
   strings::UniChar m_unicodePoint;
+  int m_fixedSize;
 };
 
 class GlyphInfo : public Texture::ResourceInfo
@@ -108,7 +120,11 @@ public:
   ref_ptr<Texture::ResourceInfo> MapResource(GlyphKey const & key, bool & newResource);
   void UploadResources(ref_ptr<Texture> texture);
 
+  bool CanBeGlyphPacked(uint32_t glyphsCount) const;
+
   bool HasAsyncRoutines() const;
+
+  uint32_t GetAbsentGlyphsCount(strings::UniString const & text, int fixedHeight) const;
 
   // ONLY for unit-tests. DO NOT use this function anywhere else.
   size_t GetPendingNodesCount();
@@ -120,7 +136,7 @@ private:
   ref_ptr<GlyphManager> m_mng;
   unique_ptr<GlyphGenerator> m_generator;
 
-  typedef map<strings::UniChar, GlyphInfo> TResourceMapping;
+  typedef map<GlyphKey, GlyphInfo> TResourceMapping;
   typedef pair<m2::RectU, GlyphManager::Glyph> TPendingNode;
   typedef vector<TPendingNode> TPendingNodes;
 
@@ -131,29 +147,33 @@ private:
 
 class FontTexture : public DynamicTexture<GlyphIndex, GlyphKey, Texture::Glyph>
 {
-  typedef DynamicTexture<GlyphIndex, GlyphKey, Texture::Glyph> TBase;
+  using TBase = DynamicTexture<GlyphIndex, GlyphKey, Texture::Glyph>;
 public:
   FontTexture(m2::PointU const & size, ref_ptr<GlyphManager> glyphMng, ref_ptr<HWTextureAllocator> allocator)
     : m_index(size, glyphMng)
   {
-    TBase::TextureParams params;
-    params.m_size = size;
-    params.m_format = TextureFormat::ALPHA;
-    params.m_filter = gl_const::GLLinear;
-
-    vector<uint8_t> initData(params.m_size.x * params.m_size.y, 0);
-    TBase::Init(allocator, make_ref(&m_index), params, make_ref(initData.data()));
+    TBase::TextureParams params{size, TextureFormat::ALPHA, gl_const::GLLinear, true /* m_usePixelBuffer */};
+    TBase::Init(allocator, make_ref(&m_index), params);
   }
 
-  ~FontTexture() { TBase::Reset(); }
+  ~FontTexture() override { TBase::Reset(); }
+
+  bool HasEnoughSpace(uint32_t newKeysCount) const override
+  {
+    return m_index.CanBeGlyphPacked(newKeysCount);
+  }
 
   bool HasAsyncRoutines() const override
   {
     return m_index.HasAsyncRoutines();
   }
 
+  uint32_t GetAbsentGlyphsCount(strings::UniString const & text, int fixedHeight) const
+  {
+    return m_index.GetAbsentGlyphsCount(text, fixedHeight);
+  }
+
 private:
   GlyphIndex m_index;
 };
-
-}
+}  // namespace dp

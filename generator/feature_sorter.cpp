@@ -1,8 +1,9 @@
 #include "generator/feature_sorter.hpp"
-#include "generator/feature_generator.hpp"
 #include "generator/feature_builder.hpp"
-#include "generator/tesselator.hpp"
+#include "generator/feature_generator.hpp"
 #include "generator/gen_mwm_info.hpp"
+#include "generator/region_meta.hpp"
+#include "generator/tesselator.hpp"
 
 #include "defines.hpp"
 
@@ -12,6 +13,7 @@
 #include "indexer/feature_impl.hpp"
 #include "indexer/geometry_serialization.hpp"
 #include "indexer/scales.hpp"
+#include "indexer/scales_patch.hpp"
 
 #include "platform/mwm_version.hpp"
 
@@ -94,7 +96,7 @@ namespace feature
     class TmpFile : public FileWriter
     {
     public:
-      explicit TmpFile(string const & filePath) : FileWriter(filePath) {}
+      explicit TmpFile(std::string const & filePath) : FileWriter(filePath) {}
       ~TmpFile()
       {
         DeleteFileX(GetName());
@@ -111,18 +113,20 @@ namespace feature
     vector<pair<uint32_t, uint32_t>> m_metadataIndex;
 
     DataHeader m_header;
+    RegionData m_regionData;
     uint32_t m_versionDate;
 
     gen::OsmID2FeatureID m_osm2ft;
 
   public:
-    FeaturesCollector2(string const & fName, DataHeader const & header, uint32_t versionDate)
+    FeaturesCollector2(std::string const & fName, DataHeader const & header,
+                       RegionData const & regionData, uint32_t versionDate)
       : FeaturesCollector(fName + DATA_FILE_TAG), m_writer(fName),
-        m_header(header), m_versionDate(versionDate)
+        m_header(header), m_regionData(regionData), m_versionDate(versionDate)
     {
       for (size_t i = 0; i < m_header.GetScalesCount(); ++i)
       {
-        string const postfix = strings::to_string(i);
+        std::string const postfix = strings::to_string(i);
         m_geoFile.push_back(make_unique<TmpFile>(fName + GEOMETRY_FILE_TAG + postfix));
         m_trgFile.push_back(make_unique<TmpFile>(fName + TRIANGLE_FILE_TAG + postfix));
       }
@@ -147,14 +151,20 @@ namespace feature
         m_header.Save(w);
       }
 
+      // write region info
+      {
+        FileWriter w = m_writer.GetWriter(REGION_INFO_FILE_TAG);
+        m_regionData.Serialize(w);
+      }
+
       // assume like we close files
       Flush();
 
       m_writer.Write(m_datFile.GetName(), DATA_FILE_TAG);
 
       // File Writer finalization function with appending to the main mwm file.
-      auto const finalizeFn = [this](unique_ptr<TmpFile> w, string const & tag,
-                                     string const & postfix = string())
+      auto const finalizeFn = [this](unique_ptr<TmpFile> w, std::string const & tag,
+                                     std::string const & postfix = std::string())
       {
         w->Flush();
         m_writer.Write(w->GetName(), tag + postfix);
@@ -162,7 +172,7 @@ namespace feature
 
       for (size_t i = 0; i < m_header.GetScalesCount(); ++i)
       {
-        string const postfix = strings::to_string(i);
+        std::string const postfix = strings::to_string(i);
         finalizeFn(move(m_geoFile[i]), GEOMETRY_FILE_TAG, postfix);
         finalizeFn(move(m_trgFile[i]), TRIANGLE_FILE_TAG, postfix);
       }
@@ -241,7 +251,7 @@ namespace feature
         tesselator::PointsInfo points;
         m2::PointU (* D2U)(m2::PointD const &, uint32_t) = &PointD2PointU;
         info.GetPointsInfo(saver.GetBasePoint(), saver.GetMaxPoint(),
-                           bind(D2U, _1, cp.GetCoordBits()), points);
+                           std::bind(D2U, std::placeholders::_1, cp.GetCoordBits()), points);
 
         // triangles processing (should be optimal)
         info.ProcessPortions(points, saver, true);
@@ -437,7 +447,7 @@ namespace feature
     bool IsCountry() const { return m_header.GetType() == feature::DataHeader::country; }
 
   public:
-    void operator() (FeatureBuilder2 & fb)
+    uint32_t operator()(FeatureBuilder2 & fb)
     {
       GeometryHolder holder(*this, fb, m_header);
 
@@ -448,7 +458,7 @@ namespace feature
       for (int i = scalesStart; i >= 0; --i)
       {
         int const level = m_header.GetScale(i);
-        if (fb.IsDrawableInRange(i > 0 ? m_header.GetScale(i-1) + 1 : 0, level))
+        if (fb.IsDrawableInRange(i > 0 ? m_header.GetScale(i-1) + 1 : 0, PatchScaleBound(level)))
         {
           bool const isCoast = fb.IsCoastCell();
           m2::RectD const rect = fb.GetLimitRect();
@@ -511,11 +521,12 @@ namespace feature
         }
       }
 
+      uint32_t featureId = kInvalidFeatureId;
       if (fb.PreSerialize(holder.m_buffer))
       {
         fb.Serialize(holder.m_buffer, m_header.GetDefCodingParams());
 
-        uint32_t const ftID = WriteFeatureBase(holder.m_buffer.m_buffer, fb);
+        featureId = WriteFeatureBase(holder.m_buffer.m_buffer, fb);
 
         fb.GetAddressData().Serialize(*(m_helperFile[SEARCH_TOKENS]));
 
@@ -526,14 +537,17 @@ namespace feature
           uint64_t const offset = w->Pos();
           ASSERT_LESS_OR_EQUAL(offset, numeric_limits<uint32_t>::max(), ());
 
-          m_metadataIndex.emplace_back(ftID, static_cast<uint32_t>(offset));
+          m_metadataIndex.emplace_back(featureId, static_cast<uint32_t>(offset));
           fb.GetMetadata().Serialize(*w);
         }
 
-        uint64_t const osmID = fb.GetWayIDForRouting();
-        if (osmID != 0)
-          m_osm2ft.Add(make_pair(osmID, ftID));
-      }
+        if (!fb.GetOsmIds().empty())
+        {
+          osm::Id const osmId = fb.GetMostGenericOsmId();
+          m_osm2ft.Add(make_pair(osmId, featureId));
+        }
+      };
+      return featureId;
     }
   };
 
@@ -543,26 +557,10 @@ namespace feature
     return static_cast<FeatureBuilder2 &>(fb);
   }
 
-  class DoStoreLanguages
+  bool GenerateFinalFeatures(feature::GenerateInfo const & info, std::string const & name, int mapType)
   {
-    DataHeader & m_header;
-  public:
-    DoStoreLanguages(DataHeader & header) : m_header(header) {}
-    void operator() (string const & s)
-    {
-      int8_t const i = StringUtf8Multilang::GetLangIndex(s);
-      if (i > 0)
-      {
-        // 0 index is always 'default'
-        m_header.AddLanguage(i);
-      }
-    }
-  };
-
-  bool GenerateFinalFeatures(feature::GenerateInfo const & info, string const & name, int mapType)
-  {
-    string const srcFilePath = info.GetTmpFileName(name);
-    string const datFilePath = info.GetTargetFileName(name);
+    std::string const srcFilePath = info.GetTmpFileName(name);
+    std::string const datFilePath = info.GetTargetFileName(name);
 
     // stores cellIds for middle points
     CalculateMidPoints midPoints;
@@ -596,23 +594,15 @@ namespace feature
       // type
       header.SetType(static_cast<DataHeader::MapType>(mapType));
 
-      // languages
-      try
-      {
-        FileReader reader(info.m_targetDir + "metainfo/" + name + ".meta");
-        string buffer;
-        reader.ReadAsString(buffer);
-        strings::Tokenize(buffer, "|", DoStoreLanguages(header));
-      }
-      catch (Reader::Exception const &)
-      {
-        LOG(LWARNING, ("No language file for country:", name));
-      }
+      // region data
+      RegionData regionData;
+      if (!ReadRegionData(name, regionData))
+        LOG(LWARNING, ("No extra data for country:", name));
 
       // Transform features from raw format to optimized format.
       try
       {
-        FeaturesCollector2 collector(datFilePath, header, info.m_versionDate);
+        FeaturesCollector2 collector(datFilePath, header, regionData, info.m_versionDate);
 
         for (size_t i = 0; i < midPoints.m_vec.size(); ++i)
         {

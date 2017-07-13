@@ -141,6 +141,11 @@ Platform::EConnectionType Platform::ConnectionStatus()
   return EConnectionType::CONNECTION_NONE;
 }
 
+Platform::ChargingStatus Platform::GetChargingStatus()
+{
+  return Platform::ChargingStatus::Plugged;
+}
+
 Platform::TStorageStatus Platform::GetWritableStorageStatus(uint64_t neededSize) const
 {
   ULARGE_INTEGER freeSpace;
@@ -175,8 +180,4 @@ bool Platform::GetFileSizeByFullPath(string const & filePath, uint64_t & size)
     }
   }
   return false;
-}
-
-void Platform::GetSystemFontNames(FilesList & res) const
-{
 }

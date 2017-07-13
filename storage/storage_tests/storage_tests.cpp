@@ -10,6 +10,13 @@
 #include "storage/storage_tests/task_runner.hpp"
 #include "storage/storage_tests/test_map_files_downloader.hpp"
 
+#include "storage/storage_integration_tests/test_defines.hpp"
+
+#if defined(OMIM_OS_DESKTOP)
+#include "generator/generator_tests_support/test_mwm_builder.hpp"
+#endif  // defined(OMIM_OS_DESKTOP)
+
+#include "indexer/classificator_loader.hpp"
 #include "indexer/indexer_tests/test_mwm_set.hpp"
 
 #include "platform/country_file.hpp"
@@ -19,6 +26,7 @@
 #include "platform/platform.hpp"
 #include "platform/platform_tests_support/scoped_dir.hpp"
 #include "platform/platform_tests_support/scoped_file.hpp"
+#include "platform/platform_tests_support/writable_dir_changer.hpp"
 
 #include "platform/platform_tests_support/scoped_dir.hpp"
 
@@ -35,20 +43,22 @@
 
 #include "std/bind.hpp"
 #include "std/condition_variable.hpp"
+#include "std/exception.hpp"
 #include "std/map.hpp"
 #include "std/mutex.hpp"
 #include "std/shared_ptr.hpp"
 #include "std/unique_ptr.hpp"
 #include "std/vector.hpp"
 
+using namespace platform::tests_support;
 using namespace platform;
 
 namespace storage
 {
-namespace
-{
 string const kMapTestDir = "map-tests";
 
+namespace
+{
 using TLocalFilePtr = shared_ptr<LocalCountryFile>;
 
 string const kSingleMwmCountriesTxt = string(R"({
@@ -64,6 +74,28 @@ string const kSingleMwmCountriesTxt = string(R"({
                 "affiliations":
                 [
                  "Georgia", "Russia", "Europe"
+                ]
+               },
+               {
+               "id": "OutdatedCountry1",
+               "s": 50,
+               "old": [
+                       "NormalCountry"
+                       ],
+               "affiliations":
+               [
+                "TestFiles", "Miracle", "Ganimed"
+                ]
+               },
+               {
+               "id": "OutdatedCountry2",
+               "s": 1000,
+               "old": [
+                       "NormalCountry"
+                       ],
+               "affiliations":
+               [
+                "TestFiles", "Miracle", "Ganimed"
                 ]
                },
                {
@@ -229,7 +261,7 @@ public:
     m_slot = m_storage.Subscribe(
         bind(&CountryDownloaderChecker::OnCountryStatusChanged, this, _1),
         bind(&CountryDownloaderChecker::OnCountryDownloadingProgress, this, _1, _2));
-    TEST(storage.IsCoutryIdCountryTreeLeaf(countryId), (m_countryFile));
+    TEST(storage.IsLeaf(countryId), (m_countryFile));
     TEST(!m_transitionList.empty(), (m_countryFile));
   }
 
@@ -496,9 +528,10 @@ class StorageTest
 protected:
   Storage storage;
   TaskRunner runner;
+  WritableDirChanger writableDirChanger;
 
 public:
- StorageTest() { InitStorage(storage, runner); }
+  StorageTest() : writableDirChanger(kMapTestDir) { InitStorage(storage, runner); }
 };
 
 class TwoComponentStorageTest
@@ -506,9 +539,10 @@ class TwoComponentStorageTest
 protected:
   Storage storage;
   TaskRunner runner;
+  WritableDirChanger writableDirChanger;
 
 public:
- TwoComponentStorageTest() : storage(COUNTRIES_OBSOLETE_FILE)
+ TwoComponentStorageTest() : storage(COUNTRIES_OBSOLETE_FILE), writableDirChanger(kMapTestDir)
  {
    InitStorage(storage, runner);
  }
@@ -984,7 +1018,7 @@ UNIT_TEST(StorageTest_GetChildren)
 
   TCountriesVec countriesList;
   storage.GetChildren(world, countriesList);
-  TEST_EQUAL(countriesList.size(), 5, ());
+  TEST_EQUAL(countriesList.size(), 7, ());
   TEST_EQUAL(countriesList.front(), "Abkhazia", ());
   TEST_EQUAL(countriesList.back(), "Country2", ());
 
@@ -1067,21 +1101,45 @@ UNIT_CLASS_TEST(StorageTest, DownloadedMap)
   // Storage::GetChildrenInGroups test when at least Algeria_Central and Algeria_Coast have been downloaded.
   TCountryId const rootCountryId = storage.GetRootId();
   TEST_EQUAL(rootCountryId, "Countries", ());
+
   TCountriesVec downloaded, available;
+  TCountriesVec downloadedWithKeep, availableWithKeep;
+
   storage.GetChildrenInGroups(rootCountryId, downloaded, available);
-  sort(downloaded.begin(), downloaded.end());
+  TEST_EQUAL(downloaded.size(), 1, (downloaded));
+  TEST_EQUAL(available.size(), 223, ());
+
+  storage.GetChildrenInGroups(rootCountryId, downloadedWithKeep,
+                              availableWithKeep, true /* keepAvailableChildren*/);
+  TEST_EQUAL(downloadedWithKeep.size(), 1, (downloadedWithKeep));
+  TEST_EQUAL(availableWithKeep.size(), 224, ());
 
   storage.GetChildrenInGroups("Algeria", downloaded, available);
-  sort(downloaded.begin(), downloaded.end());
+  TEST_EQUAL(downloaded.size(), 2, (downloaded));
+
+  storage.GetChildrenInGroups("Algeria", downloadedWithKeep,
+                              availableWithKeep, true /* keepAvailableChildren*/);
+  TEST_EQUAL(downloadedWithKeep.size(), 2, (downloadedWithKeep));
+  TEST_EQUAL(availableWithKeep.size(), 2, (availableWithKeep));
 
   storage.GetChildrenInGroups("Algeria_Central", downloaded, available);
   TEST(downloaded.empty(), ());
+
+  storage.GetChildrenInGroups("Algeria_Central", downloadedWithKeep,
+                              availableWithKeep, true /* keepAvailableChildren*/);
+  TEST_EQUAL(downloadedWithKeep.size(), 0, (downloadedWithKeep));
+  TEST_EQUAL(availableWithKeep.size(), 0, (availableWithKeep));
 
   storage.DeleteCountry(algeriaCentralCountryId, MapOptions::Map);
   // Storage::GetChildrenInGroups test when Algeria_Coast has been downloaded and
   // Algeria_Central has been deleted.
   storage.GetChildrenInGroups(rootCountryId, downloaded, available);
-  sort(downloaded.begin(), downloaded.end());
+  TEST_EQUAL(downloaded.size(), 1, (downloaded));
+
+  storage.GetChildrenInGroups("Algeria", downloadedWithKeep,
+                              availableWithKeep, true /* keepAvailableChildren*/);
+  TEST_EQUAL(downloadedWithKeep.size(), 1, (downloadedWithKeep));
+  TEST_EQUAL(availableWithKeep.size(), 2, (availableWithKeep));
 
   storage.GetChildrenInGroups("Algeria_Central", downloaded, available);
   TEST(downloaded.empty(), ());
@@ -1321,11 +1379,47 @@ UNIT_TEST(StorageTest_GetNodeAttrsSingleMwm)
   TEST(!nodeAttrs.m_present, ());
 }
 
+#if defined(OMIM_OS_DESKTOP)
 UNIT_TEST(StorageTest_GetUpdateInfoSingleMwm)
 {
+  classificator::Load();
+  WritableDirChanger writableDirChanger(kMapTestDir);
+
+  Platform & platform = GetPlatform();
+
+  string const kVersion1Dir = my::JoinFoldersToPath(platform.WritableDir(), "1");
+  platform.MkDir(kVersion1Dir);
+
+  LocalCountryFile country1(kVersion1Dir, CountryFile("OutdatedCountry1"), 1);
+  LocalCountryFile country2(kVersion1Dir, CountryFile("OutdatedCountry2"), 1);
+
+  using namespace generator::tests_support;
+  {
+    TestMwmBuilder builder(country1, feature::DataHeader::country);
+  }
+  {
+    TestMwmBuilder builder(country2, feature::DataHeader::country);
+  }
+
   Storage storage(kSingleMwmCountriesTxt, make_unique<TestMapFilesDownloader>());
+  storage.RegisterAllLocalMaps();
+
+  country1.SyncWithDisk();
+  country2.SyncWithDisk();
+  auto const country1Size = country1.GetSize(MapOptions::Map);
+  auto const country2Size = country2.GetSize(MapOptions::Map);
 
   Storage::UpdateInfo updateInfo;
+
+  storage.GetUpdateInfo("OutdatedCountry1", updateInfo);
+  TEST_EQUAL(updateInfo.m_numberOfMwmFilesToUpdate, 1, ());
+  TEST_EQUAL(updateInfo.m_totalUpdateSizeInBytes, 50, ());
+  TEST_EQUAL(updateInfo.m_sizeDifference, 50 - country1Size, ());
+
+  storage.GetUpdateInfo("OutdatedCountry2", updateInfo);
+  TEST_EQUAL(updateInfo.m_numberOfMwmFilesToUpdate, 1, ());
+  TEST_EQUAL(updateInfo.m_totalUpdateSizeInBytes, 1000, ());
+  TEST_EQUAL(updateInfo.m_sizeDifference, 1000 - country2Size, ());
 
   storage.GetUpdateInfo("Abkhazia", updateInfo);
   TEST_EQUAL(updateInfo.m_numberOfMwmFilesToUpdate, 0, ());
@@ -1340,9 +1434,11 @@ UNIT_TEST(StorageTest_GetUpdateInfoSingleMwm)
   TEST_EQUAL(updateInfo.m_totalUpdateSizeInBytes, 0, ());
 
   storage.GetUpdateInfo(storage.GetRootId(), updateInfo);
-  TEST_EQUAL(updateInfo.m_numberOfMwmFilesToUpdate, 0, ());
-  TEST_EQUAL(updateInfo.m_totalUpdateSizeInBytes, 0, ());
+  TEST_EQUAL(updateInfo.m_numberOfMwmFilesToUpdate, 2, ());
+  TEST_EQUAL(updateInfo.m_totalUpdateSizeInBytes, 1050, ());
+  TEST_EQUAL(updateInfo.m_sizeDifference, (1000 + 50) - (country1Size + country2Size), ());
 }
+#endif  // defined(OMIM_OS_DESKTOP)
 
 UNIT_TEST(StorageTest_ParseStatus)
 {
@@ -1366,7 +1462,8 @@ UNIT_TEST(StorageTest_ForEachInSubtree)
   };
   storage.ForEachInSubtree(storage.GetRootId(), forEach);
 
-  TCountriesVec const expectedLeafVec = {"Abkhazia", "Algeria_Central", "Algeria_Coast", "South Korea_South",
+  TCountriesVec const expectedLeafVec = {"Abkhazia", "OutdatedCountry1", "OutdatedCountry2", "Algeria_Central",
+                                         "Algeria_Coast", "South Korea_South",
                                          "Disputable Territory", "Indisputable Territory Of Country1",
                                          "Indisputable Territory Of Country2", "Disputable Territory"};
   TEST_EQUAL(leafVec, expectedLeafVec, ());
@@ -1588,6 +1685,17 @@ UNIT_TEST(StorageTest_DeleteNodeWithoutDownloading)
   TEST_EQUAL(nodeAttrs.m_status, NodeStatus::NotDownloaded, ());
 }
 
+UNIT_TEST(StorageTest_GetOverallProgressSmokeTest)
+{
+  Storage storage(kSingleMwmCountriesTxt, make_unique<TestMapFilesDownloader>());
+  TaskRunner runner;
+  InitStorage(storage, runner);
+  
+  MapFilesDownloader::TProgress currentProgress = storage.GetOverallProgress({"Abkhazia","Algeria_Coast"});
+  TEST_EQUAL(currentProgress.first, 0, ());
+  TEST_EQUAL(currentProgress.second, 0, ());
+}
+
 UNIT_TEST(StorageTest_GetQueuedChildrenSmokeTest)
 {
   Storage storage(kSingleMwmCountriesTxt, make_unique<TestMapFilesDownloader>());
@@ -1604,4 +1712,88 @@ UNIT_TEST(StorageTest_GetQueuedChildrenSmokeTest)
   storage.GetQueuedChildren("Country1", queuedChildren);
   TEST(queuedChildren.empty(), ());
 }
+  
+UNIT_TEST(StorageTest_GetGroupNodePathToRootTest)
+{
+  Storage storage;
+  
+  TCountriesVec path;
+  
+  storage.GetGroupNodePathToRoot("France_Auvergne_Allier", path);
+  TEST(path.empty(), ());
+  
+  storage.GetGroupNodePathToRoot("France_Auvergne", path);
+  TEST_EQUAL(path.size(), 2, (path));
+  TEST_EQUAL(path[0], "France", ());
+  TEST_EQUAL(path[1], "Countries", ());
+  
+  storage.GetGroupNodePathToRoot("France", path);
+  TEST_EQUAL(path.size(), 1, (path));
+  TEST_EQUAL(path[0], "Countries", ());
+  
+  storage.GetGroupNodePathToRoot("US_Florida_Miami", path);
+  TEST(path.empty(), ());
+
+  storage.GetGroupNodePathToRoot("Florida", path);
+  TEST_EQUAL(path.size(), 2, (path));
+  TEST_EQUAL(path[0], "United States of America", ());
+  TEST_EQUAL(path[1], "Countries", ());
+
+  storage.GetGroupNodePathToRoot("Country1", path);
+  TEST(path.empty(), ());
+}
+
+UNIT_TEST(StorageTest_GetTopmostNodesFor)
+{
+  Storage storage;
+
+  TCountriesVec path;
+
+  storage.GetTopmostNodesFor("France_Auvergne_Allier", path);
+  TEST_EQUAL(path.size(), 1, (path));
+  TEST_EQUAL(path[0], "France", ());
+
+  storage.GetTopmostNodesFor("France_Auvergne", path);
+  TEST_EQUAL(path.size(), 1, (path));
+  TEST_EQUAL(path[0], "France", ());
+
+  storage.GetTopmostNodesFor("Jerusalem", path);
+  TEST_EQUAL(path.size(), 2, (path));
+  TEST_EQUAL(path[0], "Israel Region", (path));
+  TEST_EQUAL(path[1], "Palestine Region", (path));
+}
+
+UNIT_TEST(StorageTest_GetTopmostNodesForWithLevel)
+{
+  Storage storage;
+
+  TCountriesVec path;
+
+  storage.GetTopmostNodesFor("France_Burgundy_Saone-et-Loire", path, 0);
+  TEST_EQUAL(path.size(), 1, (path));
+  TEST_EQUAL(path[0], "France", ());
+
+  storage.GetTopmostNodesFor("France_Burgundy_Saone-et-Loire", path, 1);
+  TEST_EQUAL(path.size(), 1, (path));
+  TEST_EQUAL(path[0], "France_Burgundy", ());
+
+  storage.GetTopmostNodesFor("France_Burgundy_Saone-et-Loire", path, 2);
+  TEST_EQUAL(path.size(), 1, (path));
+  TEST_EQUAL(path[0], "France_Burgundy_Saone-et-Loire", ());
+
+  // Below tests must return path with single element same as input.
+  storage.GetTopmostNodesFor("France_Burgundy_Saone-et-Loire", path, 3);
+  TEST_EQUAL(path.size(), 1, (path));
+  TEST_EQUAL(path[0], "France_Burgundy_Saone-et-Loire", ());
+
+  storage.GetTopmostNodesFor("France_Burgundy_Saone-et-Loire", path, -1);
+  TEST_EQUAL(path.size(), 1, (path));
+  TEST_EQUAL(path[0], "France_Burgundy_Saone-et-Loire", ());
+
+  storage.GetTopmostNodesFor("France_Burgundy_Saone-et-Loire", path, 10000);
+  TEST_EQUAL(path.size(), 1, (path));
+  TEST_EQUAL(path[0], "France_Burgundy_Saone-et-Loire", ());
+}
+
+
 }  // namespace storage

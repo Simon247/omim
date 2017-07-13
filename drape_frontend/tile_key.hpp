@@ -1,10 +1,14 @@
 #pragma once
 
 #include "geometry/rect2d.hpp"
+#include "geometry/screenbase.hpp"
+
+#include "base/matrix.hpp"
+
+#include <string>
 
 namespace df
 {
-
 struct TileKey
 {
   TileKey();
@@ -24,6 +28,10 @@ struct TileKey
 
   m2::RectD GetGlobalRect(bool clipByDataMaxZoom = true) const;
 
+  math::Matrix<float, 4, 4> GetTileBasedModelView(ScreenBase const & screen) const;
+
+  m2::PointI GetTileCoords() const;
+
   int m_x;
   int m_y;
   int m_zoomLevel;
@@ -39,6 +47,5 @@ struct TileKeyStrictComparator
   }
 };
 
-string DebugPrint(TileKey const & key);
-
-} // namespace df
+std::string DebugPrint(TileKey const & key);
+}  // namespace df

@@ -1,18 +1,19 @@
 #include "generator/coastlines_generator.hpp"
 #include "generator/feature_builder.hpp"
 
-#include "indexer/point_to_int64.hpp"
+#include "coding/point_to_integer.hpp"
 
 #include "geometry/region2d/binary_operators.hpp"
 
 #include "base/string_utils.hpp"
 #include "base/logging.hpp"
 
-#include "std/bind.hpp"
-#include "std/condition_variable.hpp"
-#include "std/function.hpp"
-#include "std/thread.hpp"
-#include "std/utility.hpp"
+#include <condition_variable>
+#include <functional>
+#include <thread>
+#include <utility>
+
+using namespace std;
 
 typedef m2::RegionI RegionT;
 typedef m2::PointI PointT;
@@ -272,7 +273,7 @@ public:
     // Do 'and' with all regions and accumulate the result, including bound region.
     // In 'odd' parts we will have an ocean.
     DoDifference doDiff(rectR);
-    m_index.ForEachInRect(GetLimitRect(rectR), bind<void>(ref(doDiff), _1));
+    m_index.ForEachInRect(GetLimitRect(rectR), bind<void>(ref(doDiff), placeholders::_1));
 
     // Check if too many points for feature.
     if (cell.Level() < kHighLevel && doDiff.GetPointsCount() >= kMaxPoints)

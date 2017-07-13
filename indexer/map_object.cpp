@@ -4,6 +4,7 @@
 #include "indexer/cuisines.hpp"
 #include "indexer/feature.hpp"
 #include "indexer/feature_algo.hpp"
+#include "indexer/ftypes_matcher.hpp"
 
 #include "platform/measurement_utils.hpp"
 #include "platform/preferred_languages.hpp"
@@ -19,7 +20,15 @@ constexpr char const * kWlan = "wlan";
 constexpr char const * kWired = "wired";
 constexpr char const * kYes = "yes";
 constexpr char const * kNo = "no";
+
+void SetInetIfNeeded(FeatureType const & ft, feature::Metadata & metadata)
+{
+  if (!ftypes::IsWifiChecker::Instance()(ft) || metadata.Has(feature::Metadata::FMD_INTERNET))
+    return;
+
+  metadata.Set(feature::Metadata::FMD_INTERNET, kWlan);
 }
+}  // namespace
 
 string DebugPrint(osm::Internet internet)
 {
@@ -65,6 +74,8 @@ void MapObject::SetFromFeatureType(FeatureType const & ft)
   m_featureID = ft.GetID();
   ASSERT(m_featureID.IsValid(), ());
   m_geomType = ft.GetFeatureType();
+
+  SetInetIfNeeded(ft, m_metadata);
 }
 
 FeatureID const & MapObject::GetID() const { return m_featureID; }
@@ -165,7 +176,7 @@ string MapObject::GetElevationFormatted() const
   {
     double value;
     if (strings::to_double(m_metadata.Get(feature::Metadata::FMD_ELE), value))
-      return MeasurementUtils::FormatAltitude(value);
+      return measurement_utils::FormatAltitude(value);
     else
       LOG(LWARNING,
           ("Invalid metadata for elevation:", m_metadata.Get(feature::Metadata::FMD_ELE)));
@@ -187,6 +198,13 @@ string MapObject::GetBuildingLevels() const
   return m_metadata.Get(feature::Metadata::FMD_BUILDING_LEVELS);
 }
 
+wheelchair::Type MapObject::GetWheelchairType() const
+{
+  return wheelchair::Matcher::GetType(m_types);
+}
+
 feature::Metadata const & MapObject::GetMetadata() const { return m_metadata; }
 bool MapObject::IsPointType() const { return m_geomType == feature::EGeomType::GEOM_POINT; }
+bool MapObject::IsBuilding() const { return ftypes::IsBuildingChecker::Instance()(m_types); }
+
 }  // namespace osm

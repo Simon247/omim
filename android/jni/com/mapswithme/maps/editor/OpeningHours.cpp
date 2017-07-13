@@ -7,9 +7,9 @@
 
 #include "base/logging.hpp"
 
-#include "std/algorithm.hpp"
-#include "std/set.hpp"
-#include "std/vector.hpp"
+#include <algorithm>
+#include <set>
+#include <vector>
 
 #include "3party/opening_hours/opening_hours.hpp"
 
@@ -62,20 +62,6 @@ jobject JavaTimespan(JNIEnv * env, osmoh::Timespan const & timespan)
                       JavaHoursMinutes(env, end.GetHoursCount(), end.GetMinutesCount()));
 }
 
-jobjectArray JavaTimespans(JNIEnv * env, vector<Timespan> const & spans)
-{
-  int const size = spans.size();
-  jobjectArray const result = env->NewObjectArray(size, g_clazzTimespan, 0);
-  for (int i = 0; i < size; i++)
-  {
-    jobject const jSpan = JavaTimespan(env, spans[i]);
-    env->SetObjectArrayElement(result, i, jSpan);
-    env->DeleteLocalRef(jSpan);
-  }
-
-  return result;
-}
-
 jobject JavaTimetable(JNIEnv * env, jobject workingHours, jobject closedHours, bool isFullday, jintArray weekdays)
 {
   jobject const tt = env->NewObject(g_clazzTimetable, g_ctorTimetable, workingHours, closedHours, isFullday, weekdays);
@@ -86,10 +72,10 @@ jobject JavaTimetable(JNIEnv * env, jobject workingHours, jobject closedHours, b
 jobject JavaTimetable(JNIEnv * env, TimeTable const & tt)
 {
   auto const excludeSpans = tt.GetExcludeTime();
-  set<Weekday> weekdays = tt.GetOpeningDays();
-  vector<int> weekdaysVector;
+  std::set<Weekday> weekdays = tt.GetOpeningDays();
+  std::vector<int> weekdaysVector;
   weekdaysVector.reserve(weekdays.size());
-  transform(weekdays.begin(), weekdays.end(), back_inserter(weekdaysVector), [](Weekday weekday)
+  std::transform(weekdays.begin(), weekdays.end(), std::back_inserter(weekdaysVector), [](Weekday weekday)
   {
     return static_cast<int>(weekday);
   });
@@ -98,7 +84,10 @@ jobject JavaTimetable(JNIEnv * env, TimeTable const & tt)
 
   return JavaTimetable(env,
                        JavaTimespan(env, tt.GetOpeningTime()),
-                       JavaTimespans(env, tt.GetExcludeTime()),
+                       jni::ToJavaArray(env, g_clazzTimespan, tt.GetExcludeTime(), [](JNIEnv * env, osmoh::Timespan const & timespan)
+                       {
+                         return JavaTimespan(env, timespan);
+                       }),
                        tt.IsTwentyFourHours(),
                        jWeekdays);
 }
@@ -109,9 +98,8 @@ jobjectArray JavaTimetables(JNIEnv * env, TimeTableSet & tts)
   jobjectArray const result = env->NewObjectArray(size, g_clazzTimetable, 0);
   for (int i = 0; i < size; i++)
   {
-    jobject const jTable = JavaTimetable(env, tts.Get(i));
-    env->SetObjectArrayElement(result, i, jTable);
-    env->DeleteLocalRef(jTable);
+    jni::TScopedLocalRef jTable(env, JavaTimetable(env, tts.Get(i)));
+    env->SetObjectArrayElement(result, i, jTable.get());
   }
 
   return result;
@@ -149,12 +137,9 @@ TimeTable NativeTimetable(JNIEnv * env, jobject jTimetable)
   size = env->GetArrayLength(jClosedSpans);
   for (int i = 0; i < size; i++)
   {
-    jobject const jSpan = env->GetObjectArrayElement(jClosedSpans, i);
-    if (jSpan)
-    {
-      tt.AddExcludeTime(NativeTimespan(env, jSpan));
-      env->DeleteLocalRef(jSpan);
-    }
+    jni::TScopedLocalRef jSpan(env, env->GetObjectArrayElement(jClosedSpans, i));
+    if (jSpan.get())
+      tt.AddExcludeTime(NativeTimespan(env, jSpan.get()));
   }
   return tt;
 }
@@ -168,9 +153,8 @@ TimeTableSet NativeTimetableSet(JNIEnv * env, jobjectArray jTimetables)
 
   for (int i = 1; i < size; i++)
   {
-    jobject const timetable = env->GetObjectArrayElement(jTimetables, i);
-    tts.Append(NativeTimetable(env, timetable));
-    env->DeleteLocalRef(timetable);
+    jni::TScopedLocalRef timetable(env, env->GetObjectArrayElement(jTimetables, i));
+    tts.Append(NativeTimetable(env, timetable.get()));
   }
 
   return tts;
@@ -299,7 +283,7 @@ JNIEXPORT jobjectArray JNICALL
 Java_com_mapswithme_maps_editor_OpeningHours_nativeTimetablesFromString(JNIEnv * env, jclass clazz, jstring jSource)
 {
   TimeTableSet tts;
-  string const source = jni::ToNativeString(env, jSource);
+  std::string const source = jni::ToNativeString(env, jSource);
   if (!source.empty()  && MakeTimeTableSet(OpeningHours(source), tts))
     return JavaTimetables(env, tts);
 
@@ -310,7 +294,7 @@ JNIEXPORT jstring JNICALL
 Java_com_mapswithme_maps_editor_OpeningHours_nativeTimetablesToString(JNIEnv * env, jclass clazz, jobjectArray jTts)
 {
   TimeTableSet tts = NativeTimetableSet(env, jTts);
-  stringstream sstr;
+  std::stringstream sstr;
   sstr << MakeOpeningHours(tts).GetRule();
   return jni::ToJavaString(env, sstr.str());
 }

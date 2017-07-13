@@ -1,23 +1,24 @@
 #include "drape/overlay_tree.hpp"
 
+#include "drape/constants.hpp"
+#include "drape/debug_rect_renderer.hpp"
+
 #include "std/algorithm.hpp"
 #include "std/bind.hpp"
 
 namespace dp
 {
-
 int const kFrameUpdatePeriod = 10;
-int const kAverageHandlesCount[dp::OverlayRanksCount] = { 300, 200, 50 };
+size_t const kAverageHandlesCount[dp::OverlayRanksCount] = { 300, 200, 50 };
+int const kInvalidFrame = -1;
 
 namespace
 {
-
 class HandleComparator
 {
 public:
-  HandleComparator(bool enableMask, bool followingMode)
-    : m_followingMode(followingMode)
-    , m_enableMask(enableMask)
+  HandleComparator(bool enableMask)
+    : m_enableMask(enableMask)
   {}
 
   bool operator()(ref_ptr<OverlayHandle> const & l, ref_ptr<OverlayHandle> const & r) const
@@ -29,41 +30,65 @@ public:
   {
     uint64_t const mask = m_enableMask ? l->GetPriorityMask() & r->GetPriorityMask() :
                                          dp::kPriorityMaskAll;
-    uint64_t const priorityLeft = (m_followingMode ? l->GetPriorityInFollowingMode() :
-                                                     l->GetPriority()) & mask;
-    uint64_t const priorityRight = (m_followingMode ? r->GetPriorityInFollowingMode() :
-                                                      r->GetPriority()) & mask;
+    uint64_t const priorityLeft = l->GetPriority() & mask;
+    uint64_t const priorityRight = r->GetPriority() & mask;
     if (priorityLeft > priorityRight)
       return true;
 
     if (priorityLeft == priorityRight)
     {
-      auto const & hashLeft = l->GetFeatureID();
-      auto const & hashRight = r->GetFeatureID();
+      auto const & hashLeft = l->GetOverlayID();
+      auto const & hashRight = r->GetOverlayID();
 
-      if (hashLeft < hashRight)
+      if (hashLeft > hashRight)
         return true;
 
       if (hashLeft == hashRight)
-        return l.get() < r.get();
+        return l.get() > r.get();
     }
 
     return false;
   }
 
 private:
-  bool m_followingMode;
   bool m_enableMask;
 };
 
-} // namespace
+void StoreDisplacementInfo(ScreenBase const & modelView, int caseIndex,
+                           ref_ptr<OverlayHandle> displacingHandle,
+                           ref_ptr<OverlayHandle> displacedHandle,
+                           OverlayTree::TDisplacementInfo & displacementInfo)
+{
+#ifdef DEBUG_OVERLAYS_OUTPUT
+  LOG(LINFO, ("Displace (", caseIndex, "):", displacingHandle->GetOverlayDebugInfo(),
+              "->", displacedHandle->GetOverlayDebugInfo()));
+#else
+  UNUSED_VALUE(caseIndex);
+#endif
+
+  if (!dp::DebugRectRenderer::Instance().IsEnabled())
+    return;
+  displacementInfo.emplace_back(displacingHandle->GetExtendedPixelRect(modelView).Center(),
+                                displacedHandle->GetExtendedPixelRect(modelView).Center(),
+                                dp::Color(0, 0, 255, 255));
+}
+}  // namespace
 
 OverlayTree::OverlayTree()
-  : m_frameCounter(-1)
-  , m_followingMode(false)
+  : m_frameCounter(kInvalidFrame)
+  , m_isDisplacementEnabled(true)
 {
   for (size_t i = 0; i < m_handles.size(); i++)
     m_handles[i].reserve(kAverageHandlesCount[i]);
+}
+
+void OverlayTree::Clear()
+{
+  m_frameCounter = kInvalidFrame;
+  TBase::Clear();
+  m_handlesCache.clear();
+  for (auto & handles : m_handles)
+    handles.clear();
 }
 
 bool OverlayTree::Frame()
@@ -73,35 +98,32 @@ bool OverlayTree::Frame()
 
   m_frameCounter++;
   if (m_frameCounter >= kFrameUpdatePeriod)
-    m_frameCounter = -1;
+    m_frameCounter = kInvalidFrame;
 
   return IsNeedUpdate();
 }
 
 bool OverlayTree::IsNeedUpdate() const
 {
-  return m_frameCounter == -1;
+  return m_frameCounter == kInvalidFrame;
 }
 
 void OverlayTree::StartOverlayPlacing(ScreenBase const & screen)
 {
   ASSERT(IsNeedUpdate(), ());
-  Clear();
+  TBase::Clear();
   m_handlesCache.clear();
   m_traits.m_modelView = screen;
-
-#ifdef COLLECT_DISPLACEMENT_INFO
   m_displacementInfo.clear();
-#endif
 }
 
 void OverlayTree::Remove(ref_ptr<OverlayHandle> handle)
 {
-  if (m_frameCounter == -1)
+  if (m_frameCounter == kInvalidFrame)
     return;
 
   if (m_handlesCache.find(handle) != m_handlesCache.end())
-    m_frameCounter = -1;
+    m_frameCounter = kInvalidFrame;
 }
 
 void OverlayTree::Add(ref_ptr<OverlayHandle> handle)
@@ -113,11 +135,20 @@ void OverlayTree::Add(ref_ptr<OverlayHandle> handle)
   handle->SetIsVisible(false);
   handle->SetCachingEnable(true);
 
+  // Skip duplicates.
   if (m_handlesCache.find(handle) != m_handlesCache.end())
     return;
 
+  // Skip not-ready handles.
   if (!handle->Update(modelView))
+  {
+    handle->SetReady(false);
     return;
+  }
+  else
+  {
+    handle->SetReady(true);
+  }
 
   // Clip handles which are out of screen.
   double const kScreenRectScale = 1.2;
@@ -143,12 +174,13 @@ void OverlayTree::Add(ref_ptr<OverlayHandle> handle)
     }
   }
 
-  int const rank = handle->GetOverlayRank();
+  ASSERT_GREATER_OR_EQUAL(handle->GetOverlayRank(), 0, ());
+  size_t const rank = static_cast<size_t>(handle->GetOverlayRank());
   ASSERT_LESS(rank, m_handles.size(), ());
   m_handles[rank].emplace_back(handle);
 }
 
-void OverlayTree::InsertHandle(ref_ptr<OverlayHandle> handle,
+void OverlayTree::InsertHandle(ref_ptr<OverlayHandle> handle, int currentRank,
                                ref_ptr<OverlayHandle> const & parentOverlay)
 {
   ASSERT(IsNeedUpdate(), ());
@@ -161,15 +193,23 @@ void OverlayTree::InsertHandle(ref_ptr<OverlayHandle> handle,
 
   ScreenBase const & modelView = GetModelView();
   m2::RectD const pixelRect = handle->GetExtendedPixelRect(modelView);
+  if (!m_isDisplacementEnabled)
+  {
+    m_handlesCache.insert(handle);
+    TBase::Add(handle, pixelRect);
+    return;
+  }
 
   TOverlayContainer rivals;
-  HandleComparator comparator(true /* enableMask */, m_followingMode);
+  HandleComparator comparator(true /* enableMask */);
 
   // Find elements that already on OverlayTree and it's pixel rect
   // intersect with handle pixel rect ("Intersected elements").
   ForEachInRect(pixelRect, [&] (ref_ptr<OverlayHandle> const & h)
   {
-    bool const isParent = (h == parentOverlay);
+    bool const isParent = (h == parentOverlay) ||
+                          (h->GetOverlayID() == handle->GetOverlayID() &&
+                           h->GetOverlayRank() < handle->GetOverlayRank());
     if (!isParent && handle->IsIntersect(modelView, h))
       rivals.push_back(h);
   });
@@ -180,48 +220,39 @@ void OverlayTree::InsertHandle(ref_ptr<OverlayHandle> handle,
   if (boundToParent)
     handleToCompare = parentOverlay;
 
-  // In this loop we decide which element must be visible.
-  // If input element "handle" more priority than all "Intersected elements"
-  // than we remove all "Intersected elements" and insert input element "handle".
-  // But if some of already inserted elements more priority than we don't insert "handle".
-  for (auto const & rivalHandle : rivals)
+  bool const selected = m_selectedFeatureID.IsValid() &&
+                        handleToCompare->GetOverlayID().m_featureId == m_selectedFeatureID;
+
+  if (!selected)
   {
-    bool rejectByDepth = false;
-    if (modelView.isPerspective())
+    // In this loop we decide which element must be visible.
+    // If input element "handle" has more priority than all "Intersected elements",
+    // then we remove all "Intersected elements" and insert input element "handle".
+    // But if some of already inserted elements have more priority, then we don't insert "handle".
+    for (auto const & rivalHandle : rivals)
     {
-      bool const pathTextComparation = handle->HasDynamicAttributes() || rivalHandle->HasDynamicAttributes();
-      rejectByDepth = !pathTextComparation &&
-                      handleToCompare->GetPivot(modelView, true).y > rivalHandle->GetPivot(modelView, true).y;
-    }
+      bool const rejectBySelected = m_selectedFeatureID.IsValid() &&
+                                    rivalHandle->GetOverlayID().m_featureId == m_selectedFeatureID;
 
-    if (rejectByDepth || comparator.IsGreater(rivalHandle, handleToCompare))
-    {
-      // Handle is displaced and bound to its parent, parent will be displaced too.
-      if (boundToParent)
+      bool rejectByDepth = false;
+      if (!rejectBySelected && modelView.isPerspective())
       {
-        DeleteHandle(parentOverlay);
-
-      #ifdef DEBUG_OVERLAYS_OUTPUT
-        LOG(LINFO, ("Displace (0):", handle->GetOverlayDebugInfo(), "->", parentOverlay->GetOverlayDebugInfo()));
-      #endif
-
-      #ifdef COLLECT_DISPLACEMENT_INFO
-        m_displacementInfo.emplace_back(DisplacementData(handle->GetExtendedPixelRect(modelView).Center(),
-                                                         parentOverlay->GetExtendedPixelRect(modelView).Center(),
-                                                         dp::Color(0, 255, 0, 255)));
-      #endif
+        bool const pathTextComparation = handle->HasLinearFeatureShape() || rivalHandle->HasLinearFeatureShape();
+        rejectByDepth = !pathTextComparation &&
+                        handleToCompare->GetPivot(modelView, true).y > rivalHandle->GetPivot(modelView, true).y;
       }
 
-    #ifdef DEBUG_OVERLAYS_OUTPUT
-      LOG(LINFO, ("Displace (1):", rivalHandle->GetOverlayDebugInfo(), "->", handle->GetOverlayDebugInfo()));
-    #endif
-
-    #ifdef COLLECT_DISPLACEMENT_INFO
-      m_displacementInfo.emplace_back(DisplacementData(rivalHandle->GetExtendedPixelRect(modelView).Center(),
-                                                       handle->GetExtendedPixelRect(modelView).Center(),
-                                                       dp::Color(0, 0, 255, 255)));
-    #endif
-      return;
+      if (rejectBySelected || rejectByDepth || comparator.IsGreater(rivalHandle, handleToCompare))
+      {
+        // Handle is displaced and bound to its parent, parent will be displaced too.
+        if (boundToParent)
+        {
+          DeleteHandleWithParents(parentOverlay, currentRank - 1);
+          StoreDisplacementInfo(modelView, 0 /* case index */, handle, parentOverlay, m_displacementInfo);
+        }
+        StoreDisplacementInfo(modelView, 1 /* case index */, rivalHandle, handle, m_displacementInfo);
+        return;
+      }
     }
   }
 
@@ -233,20 +264,10 @@ void OverlayTree::InsertHandle(ref_ptr<OverlayHandle> handle,
       // Delete rival handle and all handles bound to it.
       for (auto it = m_handlesCache.begin(); it != m_handlesCache.end();)
       {
-        if ((*it)->GetFeatureID() == rivalHandle->GetFeatureID())
+        if ((*it)->GetOverlayID() == rivalHandle->GetOverlayID())
         {
           Erase(*it);
-
-        #ifdef DEBUG_OVERLAYS_OUTPUT
-          LOG(LINFO, ("Displace (2):", handle->GetOverlayDebugInfo(), "->", (*it)->GetOverlayDebugInfo()));
-        #endif
-
-        #ifdef COLLECT_DISPLACEMENT_INFO
-          m_displacementInfo.emplace_back(DisplacementData(handle->GetExtendedPixelRect(modelView).Center(),
-                                                           (*it)->GetExtendedPixelRect(modelView).Center(),
-                                                           dp::Color(0, 0, 255, 255)));
-        #endif
-
+          StoreDisplacementInfo(modelView, 2 /* case index */, handle, *it, m_displacementInfo);
           it = m_handlesCache.erase(it);
         }
         else
@@ -258,16 +279,7 @@ void OverlayTree::InsertHandle(ref_ptr<OverlayHandle> handle,
     else
     {
       DeleteHandle(rivalHandle);
-
-    #ifdef DEBUG_OVERLAYS_OUTPUT
-      LOG(LINFO, ("Displace (3):", handle->GetOverlayDebugInfo(), "->", rivalHandle->GetOverlayDebugInfo()));
-    #endif
-
-    #ifdef COLLECT_DISPLACEMENT_INFO
-      m_displacementInfo.emplace_back(DisplacementData(handle->GetExtendedPixelRect(modelView).Center(),
-                                                       rivalHandle->GetExtendedPixelRect(modelView).Center(),
-                                                       dp::Color(0, 0, 255, 255)));
-    #endif
+      StoreDisplacementInfo(modelView, 3 /* case index */, handle, rivalHandle, m_displacementInfo);
     }
   }
 
@@ -283,7 +295,7 @@ void OverlayTree::EndOverlayPlacing()
   LOG(LINFO, ("- BEGIN OVERLAYS PLACING"));
 #endif
 
-  HandleComparator comparator(false /* enableMask */, m_followingMode);
+  HandleComparator comparator(false /* enableMask */);
 
   for (int rank = 0; rank < dp::OverlayRanksCount; rank++)
   {
@@ -294,11 +306,12 @@ void OverlayTree::EndOverlayPlacing()
       if (!CheckHandle(handle, rank, parentOverlay))
         continue;
 
-      InsertHandle(handle, parentOverlay);
+      InsertHandle(handle, rank, parentOverlay);
     }
-
-    m_handles[rank].clear();
   }
+  
+  for (int rank = 0; rank < dp::OverlayRanksCount; rank++)
+    m_handles[rank].clear();
 
   for (auto const & handle : m_handlesCache)
   {
@@ -319,26 +332,57 @@ bool OverlayTree::CheckHandle(ref_ptr<OverlayHandle> handle, int currentRank,
   if (currentRank == dp::OverlayRank0)
     return true;
 
-  int const seachingRank = currentRank - 1;
-  for (auto const & h : m_handlesCache)
-  {
-    if (h->GetFeatureID() == handle->GetFeatureID() &&
-        h->GetOverlayRank() == seachingRank)
-    {
-      parentOverlay = h;
-      return true;
-    }
-  }
+  parentOverlay = FindParent(handle, currentRank - 1);
+  return parentOverlay != nullptr;
+}
 
-  return false;
+ref_ptr<OverlayHandle> OverlayTree::FindParent(ref_ptr<OverlayHandle> handle, int searchingRank) const
+{
+  ASSERT_GREATER_OR_EQUAL(searchingRank, 0, ());
+  ASSERT_LESS(searchingRank, static_cast<int>(m_handles.size()), ());
+  for (auto const & h : m_handles[searchingRank])
+  {
+    if (h->GetOverlayID() == handle->GetOverlayID() && m_handlesCache.find(h) != m_handlesCache.end())
+      return h;
+  }
+  return nullptr;
 }
 
 void OverlayTree::DeleteHandle(ref_ptr<OverlayHandle> const & handle)
 {
   size_t const deletedCount = m_handlesCache.erase(handle);
-  ASSERT_NOT_EQUAL(deletedCount, 0, ());
   if (deletedCount != 0)
     Erase(handle);
+}
+
+void OverlayTree::DeleteHandleWithParents(ref_ptr<OverlayHandle> handle, int currentRank)
+{
+  currentRank--;
+  while (currentRank >= dp::OverlayRank0)
+  {
+    auto parent = FindParent(handle, currentRank);
+    if (parent != nullptr && parent->IsBound())
+      DeleteHandle(parent);
+    currentRank--;
+  }
+  DeleteHandle(handle);
+}
+
+bool OverlayTree::GetSelectedFeatureRect(ScreenBase const & screen, m2::RectD & featureRect)
+{
+  if (!m_selectedFeatureID.IsValid())
+    return false;
+
+  featureRect.MakeEmpty();
+  for (auto const & handle : m_handlesCache)
+  {
+    if (handle->IsVisible() && handle->GetOverlayID().m_featureId == m_selectedFeatureID)
+    {
+      m2::RectD rect = handle->GetPixelRect(screen, screen.isPerspective());
+      featureRect.Add(rect);
+    }
+  }
+  return true;
 }
 
 void OverlayTree::Select(m2::PointD const & glbPoint, TOverlayContainer & result) const
@@ -352,7 +396,7 @@ void OverlayTree::Select(m2::PointD const & glbPoint, TOverlayContainer & result
 
   for (auto const & handle : m_handlesCache)
   {
-    if (rect.IsPointInside(handle->GetPivot(screen, false)))
+    if (!handle->HasLinearFeatureShape() && rect.IsPointInside(handle->GetPivot(screen, false)))
       result.push_back(handle);
   }
 }
@@ -362,7 +406,7 @@ void OverlayTree::Select(m2::RectD const & rect, TOverlayContainer & result) con
   ScreenBase screen = m_traits.m_modelView;
   ForEachInRect(rect, [&](ref_ptr<OverlayHandle> const & h)
   {
-    if (h->IsVisible() && h->GetFeatureID().IsValid())
+    if (!h->HasLinearFeatureShape() && h->IsVisible() && h->GetOverlayID().m_featureId.IsValid())
     {
       OverlayHandle::Rects shape;
       h->GetPixelShape(screen, screen.isPerspective(), shape);
@@ -378,18 +422,19 @@ void OverlayTree::Select(m2::RectD const & rect, TOverlayContainer & result) con
   });
 }
 
-void OverlayTree::SetFollowingMode(bool mode)
+void OverlayTree::SetDisplacementEnabled(bool enabled)
 {
-  m_followingMode = mode;
+  m_isDisplacementEnabled = enabled;
+  m_frameCounter = kInvalidFrame;
 }
 
-#ifdef COLLECT_DISPLACEMENT_INFO
+void OverlayTree::SetSelectedFeature(FeatureID const & featureID)
+{
+  m_selectedFeatureID = featureID;
+}
 
 OverlayTree::TDisplacementInfo const & OverlayTree::GetDisplacementInfo() const
 {
   return m_displacementInfo;
 }
-
-#endif
-
-} // namespace dp
+}  // namespace dp

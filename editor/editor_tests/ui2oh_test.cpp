@@ -2,6 +2,8 @@
 
 #include "editor/ui2oh.hpp"
 
+#include "std/sstream.hpp"
+
 using namespace osmoh;
 using namespace editor;
 using namespace editor::ui;
@@ -307,6 +309,23 @@ UNIT_TEST(OpeningHours2TimeTableSet_off)
     TEST_EQUAL(tt.GetExcludeTime()[0].GetStart().GetHourMinutes().GetHoursCount(), 11, ());
     TEST_EQUAL(tt.GetExcludeTime()[0].GetEnd().GetHourMinutes().GetHoursCount(), 13, ());
   }
+}
+
+UNIT_TEST(OpeningHours2TimeTableSet_plus)
+{
+  OpeningHours oh("Mo-Su 11:00+");
+  TEST(oh.IsValid(), ());
+
+  TimeTableSet tts;
+
+  TEST(MakeTimeTableSet(oh, tts), ());
+  TEST_EQUAL(tts.Size(), 1, ());
+
+  auto const tt = tts.Get(0);
+  TEST_EQUAL(tts.GetUnhandledDays(), TOpeningDays(), ());
+
+  TEST_EQUAL(tt.GetOpeningTime().GetStart().GetHourMinutes().GetHoursCount(), 11, ());
+  TEST_EQUAL(tt.GetOpeningTime().GetEnd().GetHourMinutes().GetHoursCount(), 24, ());
 }
 
 UNIT_TEST(TimeTableSt2OpeningHours)

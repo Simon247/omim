@@ -4,6 +4,11 @@ import android.content.Intent;
 import android.location.Location;
 import android.os.Build;
 import android.os.Bundle;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.support.design.widget.AppBarLayout;
+import android.support.design.widget.CollapsingToolbarLayout;
+import android.support.annotation.CallSuper;
 import android.support.design.widget.TabLayout;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentManager;
@@ -15,31 +20,36 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 
-import java.util.ArrayList;
-import java.util.List;
-
-import com.mapswithme.maps.Framework;
 import com.mapswithme.maps.MwmActivity;
+import com.mapswithme.maps.MwmApplication;
 import com.mapswithme.maps.R;
 import com.mapswithme.maps.base.BaseMwmFragment;
 import com.mapswithme.maps.base.OnBackPressListener;
-import com.mapswithme.maps.bookmarks.data.MapObject;
 import com.mapswithme.maps.downloader.CountrySuggestFragment;
 import com.mapswithme.maps.downloader.MapManager;
 import com.mapswithme.maps.location.LocationHelper;
+import com.mapswithme.maps.location.LocationListener;
 import com.mapswithme.maps.routing.RoutingController;
+import com.mapswithme.maps.widget.PlaceholderView;
 import com.mapswithme.maps.widget.SearchToolbarController;
 import com.mapswithme.util.UiUtils;
 import com.mapswithme.util.Utils;
+import com.mapswithme.util.log.LoggerFactory;
 import com.mapswithme.util.statistics.Statistics;
+
+import java.util.ArrayList;
+import java.util.List;
 
 
 public class SearchFragment extends BaseMwmFragment
                          implements OnBackPressListener,
                                     NativeSearchListener,
                                     SearchToolbarController.Container,
-                                    CategoriesAdapter.OnCategorySelectedListener
+                                    CategoriesAdapter.OnCategorySelectedListener,
+                                    HotelsFilterHolder
 {
+  public static final String PREFS_SHOW_ENABLE_LOGGING_SETTING = "ShowEnableLoggingSetting";
+
   private long mLastQueryTimestamp;
 
   private static class LastPosition
@@ -64,6 +74,12 @@ public class SearchFragment extends BaseMwmFragment
     }
 
     @Override
+    protected boolean useExtendedToolbar()
+    {
+      return false;
+    }
+
+    @Override
     protected void onTextChanged(String query)
     {
       if (!isAdded())
@@ -76,9 +92,13 @@ public class SearchFragment extends BaseMwmFragment
         return;
       }
 
-      // TODO: This code only for demonstration purposes and will be removed soon
-      if (tryChangeMapStyle(query))
+      if (tryRecognizeLoggingCommand(query))
+      {
+        mSearchAdapter.clear();
+        stopSearch();
+        closeSearch();
         return;
+      }
 
       runSearch();
     }
@@ -115,11 +135,28 @@ public class SearchFragment extends BaseMwmFragment
       if (!onBackPressed())
         super.onUpClick();
     }
+
+    @Override
+    public void clear()
+    {
+      super.clear();
+      if (mFilterController != null)
+      {
+        mFilterController.setFilter(null);
+        mFilterController.updateFilterButtonVisibility(false);
+      }
+    }
   }
 
   private View mTabFrame;
   private View mResultsFrame;
-  private View mResultsPlaceholder;
+  private PlaceholderView mResultsPlaceholder;
+  private RecyclerView mResults;
+  private AppBarLayout mAppBarLayout;
+  private CollapsingToolbarLayout mToolbarLayout;
+  private View mFilterElevation;
+  @Nullable
+  private SearchFilterController mFilterController;
 
   private SearchToolbarController mToolbarController;
 
@@ -139,23 +176,50 @@ public class SearchFragment extends BaseMwmFragment
   private final LastPosition mLastPosition = new LastPosition();
   private boolean mSearchRunning;
   private String mInitialQuery;
+  @Nullable
+  private HotelsFilter mInitialHotelsFilter;
   private boolean mFromRoutePlan;
 
-  private final LocationHelper.LocationListener mLocationListener = new LocationHelper.SimpleLocationListener()
+  private final LocationListener mLocationListener = new LocationListener.Simple()
   {
     @Override
-    public void onLocationUpdated(Location l)
+    public void onLocationUpdated(Location location)
     {
-      mLastPosition.set(l.getLatitude(), l.getLongitude());
+      mLastPosition.set(location.getLatitude(), location.getLongitude());
 
       if (!TextUtils.isEmpty(getQuery()))
         mSearchAdapter.notifyDataSetChanged();
     }
   };
 
+  private final AppBarLayout.OnOffsetChangedListener mOffsetListener =
+      new AppBarLayout.OnOffsetChangedListener() {
+        @Override
+        public void onOffsetChanged(AppBarLayout appBarLayout, int verticalOffset)
+        {
+          if (mFilterController == null)
+            return;
+
+          boolean show = !(Math.abs(verticalOffset) == appBarLayout.getTotalScrollRange());
+          mFilterController.showDivider(show);
+          if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP)
+            UiUtils.showIf(!show, mFilterElevation);
+        }
+      };
+
   private static boolean doShowDownloadSuggest()
   {
     return (MapManager.nativeGetDownloadedCount() == 0 && !MapManager.nativeIsDownloading());
+  }
+
+  @Override
+  @Nullable
+  public HotelsFilter getHotelsFilter()
+  {
+    if (mFilterController == null)
+      return null;
+
+    return mFilterController.getFilter();
   }
 
   private void showDownloadSuggest()
@@ -180,13 +244,20 @@ public class SearchFragment extends BaseMwmFragment
     if (fragment != null && !fragment.isDetached() && !fragment.isRemoving())
       manager.beginTransaction()
              .remove(fragment)
-             .commit();
+             .commitAllowingStateLoss();
   }
 
   private void updateFrames()
   {
     final boolean hasQuery = mToolbarController.hasQuery();
     UiUtils.showIf(hasQuery, mResultsFrame);
+    AppBarLayout.LayoutParams lp = (AppBarLayout.LayoutParams) mToolbarLayout.getLayoutParams();
+    lp.setScrollFlags(hasQuery ? AppBarLayout.LayoutParams.SCROLL_FLAG_ENTER_ALWAYS
+                        | AppBarLayout.LayoutParams.SCROLL_FLAG_SCROLL : 0);
+    mToolbarLayout.setLayoutParams(lp);
+    if (mFilterController != null)
+      mFilterController.show(hasQuery && mSearchAdapter.getItemCount() != 0,
+                             mSearchAdapter.showPopulateButton());
 
     if (hasQuery)
       hideDownloadSuggest();
@@ -203,6 +274,8 @@ public class SearchFragment extends BaseMwmFragment
                           mToolbarController.hasQuery());
 
     UiUtils.showIf(show, mResultsPlaceholder);
+    if (mFilterController != null)
+      mFilterController.showPopulateButton(mSearchAdapter.showPopulateButton());
   }
 
   @Override
@@ -211,27 +284,60 @@ public class SearchFragment extends BaseMwmFragment
     return inflater.inflate(R.layout.fragment_search, container, false);
   }
 
+  @CallSuper
   @Override
-  public void onViewCreated(View view, Bundle savedInstanceState)
+  public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState)
   {
     super.onViewCreated(view, savedInstanceState);
     readArguments();
 
     ViewGroup root = (ViewGroup) view;
+    mAppBarLayout = (AppBarLayout) root.findViewById(R.id.app_bar);
+    mToolbarLayout = (CollapsingToolbarLayout) mAppBarLayout.findViewById(R.id.collapsing_toolbar);
     mTabFrame = root.findViewById(R.id.tab_frame);
     ViewPager pager = (ViewPager) mTabFrame.findViewById(R.id.pages);
 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
-      UiUtils.hide(mTabFrame.findViewById(R.id.tabs_divider));
-
     mToolbarController = new ToolbarController(view);
 
-    final TabAdapter tabAdapter = new TabAdapter(getChildFragmentManager(), pager, (TabLayout) root.findViewById(R.id.tabs));
+    TabLayout tabLayout = (TabLayout) root.findViewById(R.id.tabs);
+    final TabAdapter tabAdapter = new TabAdapter(getChildFragmentManager(), pager, tabLayout);
 
     mResultsFrame = root.findViewById(R.id.results_frame);
-    RecyclerView results = (RecyclerView) mResultsFrame.findViewById(R.id.recycler);
-    setRecyclerScrollListener(results);
-    mResultsPlaceholder = mResultsFrame.findViewById(R.id.placeholder);
+    mResults = (RecyclerView) mResultsFrame.findViewById(R.id.recycler);
+    setRecyclerScrollListener(mResults);
+    mResultsPlaceholder = (PlaceholderView) mResultsFrame.findViewById(R.id.placeholder);
+    mResultsPlaceholder.setContent(R.drawable.img_search_nothing_found_light,
+                                   R.string.search_not_found, R.string.search_not_found_query);
+
+    mFilterElevation = view.findViewById(R.id.filter_elevation);
+
+    mFilterController = new SearchFilterController(root.findViewById(R.id.filter_frame),
+                                                   (HotelsFilterView) view.findViewById(R.id.filter),
+                                                   new SearchFilterController.DefaultFilterListener()
+    {
+      @Override
+      public void onViewClick()
+      {
+        showAllResultsOnMap();
+      }
+
+      @Override
+      public void onFilterClear()
+      {
+        runSearch();
+      }
+
+      @Override
+      public void onFilterDone()
+      {
+        runSearch();
+      }
+    });
+    if (savedInstanceState != null)
+      mFilterController.onRestoreState(savedInstanceState);
+    if (mInitialHotelsFilter != null)
+      mFilterController.setFilter(mInitialHotelsFilter);
+    mFilterController.updateFilterButtonVisibility(false);
 
     if (mSearchAdapter == null)
     {
@@ -246,14 +352,16 @@ public class SearchFragment extends BaseMwmFragment
       });
     }
 
-    results.setLayoutManager(new LinearLayoutManager(view.getContext()));
-    results.setAdapter(mSearchAdapter);
+    mResults.setLayoutManager(new LinearLayoutManager(view.getContext()));
+    mResults.setAdapter(mSearchAdapter);
 
     updateFrames();
     updateResultsPlaceholder();
 
     if (mInitialQuery != null)
+    {
       setQuery(mInitialQuery);
+    }
     mToolbarController.activate();
 
     SearchEngine.INSTANCE.addListener(this);
@@ -264,25 +372,35 @@ public class SearchFragment extends BaseMwmFragment
     tabAdapter.setTabSelectedListener(new TabAdapter.OnTabSelectedListener()
     {
       @Override
-      public void onTabSelected(TabAdapter.Tab tab)
+      public void onTabSelected(@NonNull TabAdapter.Tab tab)
       {
+        Statistics.INSTANCE.trackSearchTabSelected(tab.name());
         mToolbarController.deactivate();
       }
     });
   }
 
   @Override
+  public void onSaveInstanceState(Bundle outState)
+  {
+    if (mFilterController != null)
+      mFilterController.onSaveState(outState);
+  }
+
+
   public void onResume()
   {
     super.onResume();
-    LocationHelper.INSTANCE.addLocationListener(mLocationListener, true);
+    LocationHelper.INSTANCE.addListener(mLocationListener, true);
+    mAppBarLayout.addOnOffsetChangedListener(mOffsetListener);
   }
 
   @Override
   public void onPause()
   {
-    LocationHelper.INSTANCE.removeLocationListener(mLocationListener);
+    LocationHelper.INSTANCE.removeListener(mLocationListener);
     super.onPause();
+    mAppBarLayout.removeOnOffsetChangedListener(mOffsetListener);
   }
 
   @Override
@@ -313,6 +431,7 @@ public class SearchFragment extends BaseMwmFragment
       return;
 
     mInitialQuery = arguments.getString(SearchActivity.EXTRA_QUERY);
+    mInitialHotelsFilter = arguments.getParcelable(SearchActivity.EXTRA_HOTELS_FILTER);
     mFromRoutePlan = RoutingController.get().isWaitingPoiPick();
   }
 
@@ -323,35 +442,28 @@ public class SearchFragment extends BaseMwmFragment
     Utils.navigateToParent(getActivity());
   }
 
-  // FIXME: This code only for demonstration purposes and will be removed soon
-  private boolean tryChangeMapStyle(String str)
+  private boolean tryRecognizeLoggingCommand(@NonNull String str)
   {
-    // Hook for shell command on change map style
-    final boolean isDark = str.equals("mapstyle:dark") || str.equals("?dark");
-    final boolean isLight = isDark ? false : str.equals("mapstyle:light") || str.equals("?light");
-    final boolean isOld = isDark || isLight ? false : str.equals("?oldstyle");
+    if (str.equals("?enableLogging"))
+    {
+      MwmApplication.prefs().edit().putBoolean(PREFS_SHOW_ENABLE_LOGGING_SETTING, true).apply();
+      return true;
+    }
 
-    if (!isDark && !isLight && !isOld)
-      return false;
+    if (str.equals("?disableLogging"))
+    {
+      LoggerFactory.INSTANCE.setFileLoggingEnabled(false);
+      MwmApplication.prefs().edit().putBoolean(PREFS_SHOW_ENABLE_LOGGING_SETTING, false).apply();
+      return true;
+    }
 
-    hideSearch();
-
-    // change map style for the Map activity
-    final int mapStyle = isOld ? Framework.MAP_STYLE_LIGHT : (isDark ? Framework.MAP_STYLE_DARK : Framework.MAP_STYLE_CLEAR);
-    Framework.nativeSetMapStyle(mapStyle);
-
-    return true;
+    return false;
   }
-  // FIXME END
 
-  private void processSelected(SearchResult result)
+  private void processSelected()
   {
     if (mFromRoutePlan)
-    {
-      //noinspection ConstantConditions
-      final MapObject point = new MapObject(MapObject.SEARCH, result.name, result.description.featureType, "", result.lat, result.lon, "");
-      RoutingController.get().onPoiSelected(point);
-    }
+      RoutingController.get().onPoiSelected(null);
 
     mToolbarController.deactivate();
 
@@ -359,16 +471,14 @@ public class SearchFragment extends BaseMwmFragment
       Utils.navigateToParent(getActivity());
   }
 
-  void showSingleResultOnMap(SearchResult result, int resultIndex)
+  void showSingleResultOnMap(int resultIndex)
   {
     final String query = getQuery();
     SearchRecents.add(query);
     SearchEngine.cancelApiCall();
 
-    if (!mFromRoutePlan)
-      SearchEngine.showResult(resultIndex);
-
-    processSelected(result);
+    SearchEngine.showResult(resultIndex);
+    processSelected();
 
     Statistics.INSTANCE.trackEvent(Statistics.EventName.SEARCH_ITEM_CLICKED);
   }
@@ -378,7 +488,13 @@ public class SearchFragment extends BaseMwmFragment
     final String query = getQuery();
     SearchRecents.add(query);
     mLastQueryTimestamp = System.nanoTime();
-    SearchEngine.searchInteractive(query, mLastQueryTimestamp, false /* isMapAndTable */);
+
+    HotelsFilter hotelsFilter = null;
+    if (mFilterController != null)
+      hotelsFilter = mFilterController.getFilter();
+
+    SearchEngine.searchInteractive(
+        query, mLastQueryTimestamp, false /* isMapAndTable */, hotelsFilter);
     SearchEngine.showAllResults(query);
     Utils.navigateToParent(getActivity());
 
@@ -402,16 +518,24 @@ public class SearchFragment extends BaseMwmFragment
 
   private void runSearch()
   {
+    HotelsFilter hotelsFilter = null;
+    if (mFilterController != null)
+      hotelsFilter = mFilterController.getFilter();
+
     mLastQueryTimestamp = System.nanoTime();
     // TODO @yunitsky Implement more elegant solution.
     if (getActivity() instanceof MwmActivity)
     {
-      SearchEngine.searchInteractive(getQuery(), mLastQueryTimestamp, true /* isMapAndTable */);
+      SearchEngine.searchInteractive(
+          getQuery(), mLastQueryTimestamp, true /* isMapAndTable */, hotelsFilter);
     }
     else
     {
-      if (!SearchEngine.search(getQuery(), mLastQueryTimestamp, true, mLastPosition.valid, mLastPosition.lat, mLastPosition.lon))
+      if (!SearchEngine.search(getQuery(), mLastQueryTimestamp, mLastPosition.valid,
+              mLastPosition.lat, mLastPosition.lon, hotelsFilter))
+      {
         return;
+      }
     }
 
     mSearchRunning = true;
@@ -421,7 +545,7 @@ public class SearchFragment extends BaseMwmFragment
   }
 
   @Override
-  public void onResultsUpdate(SearchResult[] results, long timestamp)
+  public void onResultsUpdate(SearchResult[] results, long timestamp, boolean isHotel)
   {
     if (!isAdded() || !mToolbarController.hasQuery())
       return;
@@ -431,6 +555,7 @@ public class SearchFragment extends BaseMwmFragment
     updateFrames();
     mSearchAdapter.refreshData(results);
     mToolbarController.showProgress(true);
+    updateFilterButton(isHotel);
   }
 
   @Override
@@ -446,6 +571,16 @@ public class SearchFragment extends BaseMwmFragment
     mToolbarController.setQuery(category);
   }
 
+  private void updateFilterButton(boolean isHotel)
+  {
+    if (mFilterController != null)
+    {
+      mFilterController.updateFilterButtonVisibility(isHotel);
+      if (!isHotel)
+        mFilterController.setFilter(null);
+    }
+  }
+
   @Override
   public void onActivityResult(int requestCode, int resultCode, Intent data)
   {
@@ -456,6 +591,8 @@ public class SearchFragment extends BaseMwmFragment
   @Override
   public boolean onBackPressed()
   {
+    if (mFilterController != null && mFilterController.onBackPressed())
+      return true;
     if (mToolbarController.hasQuery())
     {
       mToolbarController.clear();
@@ -466,10 +603,20 @@ public class SearchFragment extends BaseMwmFragment
     if (mFromRoutePlan)
     {
       RoutingController.get().onPoiSelected(null);
-      return !(getActivity() instanceof SearchActivity);
+      final boolean isSearchActivity = getActivity() instanceof SearchActivity;
+      if (isSearchActivity)
+        closeSearch();
+      return true;
     }
 
-    return false;
+    closeSearch();
+    return true;
+  }
+
+  private void closeSearch()
+  {
+    getActivity().finish();
+    getActivity().overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
   }
 
   public void setRecyclerScrollListener(RecyclerView recycler)

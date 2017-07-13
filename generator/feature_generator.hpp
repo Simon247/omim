@@ -4,8 +4,9 @@
 
 #include "coding/file_writer.hpp"
 
-#include "std/string.hpp"
-#include "std/vector.hpp"
+#include <limits>
+#include <string>
+#include <vector>
 
 class FeatureBuilder1;
 
@@ -19,6 +20,8 @@ class FeaturesCollector
   uint32_t m_featureID = 0;
 
 protected:
+  static uint32_t constexpr kInvalidFeatureId = std::numeric_limits<uint32_t>::max();
+
   FileWriter m_datFile;
   m2::RectD m_bounds;
 
@@ -30,17 +33,21 @@ protected:
   static uint32_t GetFileSize(FileWriter const & f);
 
   /// @return feature offset in the file, which is used as an ID later
-  uint32_t WriteFeatureBase(vector<char> const & bytes, FeatureBuilder1 const & fb);
+  uint32_t WriteFeatureBase(std::vector<char> const & bytes, FeatureBuilder1 const & fb);
 
   void Flush();
 
 public:
-  FeaturesCollector(string const & fName);
+  FeaturesCollector(std::string const & fName);
   virtual ~FeaturesCollector();
 
-  string const & GetFilePath() const { return m_datFile.GetName(); }
-
-  virtual void operator()(FeatureBuilder1 const & f);
+  std::string const & GetFilePath() const { return m_datFile.GetName(); }
+  /// \brief Serializes |f|.
+  /// \returns feature id of serialized feature if |f| is serialized after the call
+  /// and |kInvalidFeatureId| if not.
+  /// \note See implementation operator() in derived class for cases when |f| cannot be
+  /// serialized.
+  virtual uint32_t operator()(FeatureBuilder1 const & f);
 };
 
 class FeaturesAndRawGeometryCollector : public FeaturesCollector
@@ -49,10 +56,10 @@ class FeaturesAndRawGeometryCollector : public FeaturesCollector
   size_t m_rawGeometryCounter = 0;
 
 public:
-  FeaturesAndRawGeometryCollector(string const & featuresFileName,
-                                  string const & rawGeometryFileName);
+  FeaturesAndRawGeometryCollector(std::string const & featuresFileName,
+                                  std::string const & rawGeometryFileName);
   ~FeaturesAndRawGeometryCollector();
 
-  void operator()(FeatureBuilder1 const & f) override;
+  uint32_t operator()(FeatureBuilder1 const & f) override;
 };
 }

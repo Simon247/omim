@@ -2,7 +2,6 @@
 
 #include "map/user_mark.hpp"
 #include "map/user_mark_container.hpp"
-#include "map/styled_point.hpp"
 
 #include "coding/reader.hpp"
 
@@ -82,7 +81,8 @@ public:
   string GetSymbolName() const override;
 
   Type GetMarkType() const override;
-  bool RunCreationAnim() const override;
+  bool HasCreationAnimation() const override;
+  void SetCreationAnimationShown(bool shown);
 
   string const & GetName() const;
   void SetName(string const & name);
@@ -103,7 +103,7 @@ public:
 
 private:
   BookmarkData m_data;
-  mutable bool m_runCreationAnim;
+  mutable bool m_hasCreationAnimation;
 };
 
 class BookmarkCategory : public UserMarkContainer
@@ -137,7 +137,7 @@ public:
   };
 
   BookmarkCategory(string const & name, Framework & framework);
-  ~BookmarkCategory();
+  ~BookmarkCategory() override;
 
   size_t GetUserLineCount() const override;
   df::UserLineMark const * GetUserLineMark(size_t index) const override;
@@ -181,14 +181,18 @@ protected:
   UserMark * AllocateUserMark(m2::PointD const & ptOrg) override;
 };
 
-/// <category index, bookmark index>
-typedef pair<int, int> BookmarkAndCategory;
-inline BookmarkAndCategory MakeEmptyBookmarkAndCategory()
+struct BookmarkAndCategory
 {
-  return BookmarkAndCategory(int(-1), int(-1));
-}
+  BookmarkAndCategory() = default;
+  BookmarkAndCategory(size_t bookmarkIndex, size_t categoryIndex) : m_bookmarkIndex(bookmarkIndex),
+                                                              m_categoryIndex(categoryIndex) {}
 
-inline bool IsValid(BookmarkAndCategory const & bmc)
-{
-  return (bmc.first >= 0 && bmc.second >= 0);
-}
+  bool IsValid() const
+  {
+    return m_bookmarkIndex != numeric_limits<size_t>::max() &&
+                          m_categoryIndex != numeric_limits<size_t>::max();
+  };
+
+  size_t m_bookmarkIndex = numeric_limits<size_t>::max();
+  size_t m_categoryIndex = numeric_limits<size_t>::max();
+};

@@ -1,11 +1,11 @@
-#include "compass.hpp"
-#include "drape_gui.hpp"
+#include "drape_frontend/gui/compass.hpp"
 
 #include "drape_frontend/animation/show_hide_animation.hpp"
+#include "drape_frontend/gui/drape_gui.hpp"
+#include "drape_frontend/shader_def.hpp"
 
-#include "drape/glsl_types.hpp"
 #include "drape/glsl_func.hpp"
-#include "drape/shader_def.hpp"
+#include "drape/glsl_types.hpp"
 
 #include "drape/utils/vertex_decl.hpp"
 
@@ -92,7 +92,7 @@ drape_ptr<ShapeRenderer> Compass::Draw(m2::PointF & compassSize, ref_ptr<dp::Tex
 {
   dp::TextureManager::SymbolRegion region;
   tex->GetSymbolRegion("compass-image", region);
-  glsl::vec2 halfSize = glsl::ToVec2(m2::PointD(region.GetPixelSize()) * 0.5);
+  glsl::vec2 halfSize = glsl::ToVec2(region.GetPixelSize() * 0.5f);
   m2::RectF texRect = region.GetTexRect();
 
   ASSERT_EQUAL(m_position.m_anchor, dp::Center, ());

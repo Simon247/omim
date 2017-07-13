@@ -4,6 +4,7 @@
 
 #include "std/function.hpp"
 #include "std/limits.hpp"
+#include "std/vector.hpp"
 
 class ScreenBase;
 
@@ -36,8 +37,9 @@ public:
 
   void Update(ScreenBase const & modelView);
   void CollectOverlayHandles(ref_ptr<OverlayTree> tree);
+  bool HasOverlayHandles() const;
   void RemoveOverlayHandles(ref_ptr<OverlayTree> tree);
-  void Render();
+  void Render(bool drawAsLine);
 
   // Only for testing! Don't use this function in production code!
   void RenderDebug(ScreenBase const & screen) const;

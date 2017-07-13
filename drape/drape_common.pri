@@ -1,15 +1,11 @@
-CMDRES = $$system(python ../tools/autobuild/shader_preprocessor.py $$SHADER_COMPILE_ARGS)
-!isEmpty($$CMDRES):message($$CMDRES)
-
 INCLUDEPATH *= $$ROOT_DIR/3party/freetype/include
 
 SOURCES += \
-    $$ROOT_DIR/3party/sdf_image/sdf_image.cpp \
-    $$ROOT_DIR/3party/stb_image/stb_image.c \
     $$DRAPE_DIR/attribute_buffer_mutator.cpp \
     $$DRAPE_DIR/attribute_provider.cpp \
     $$DRAPE_DIR/batcher.cpp \
     $$DRAPE_DIR/batcher_helpers.cpp \
+    $$DRAPE_DIR/bidi.cpp \
     $$DRAPE_DIR/binding_info.cpp \
     $$DRAPE_DIR/buffer_base.cpp \
     $$DRAPE_DIR/color.cpp \
@@ -17,7 +13,7 @@ SOURCES += \
     $$DRAPE_DIR/data_buffer.cpp \
     $$DRAPE_DIR/debug_rect_renderer.cpp \
     $$DRAPE_DIR/font_texture.cpp \
-    $$DRAPE_DIR/fribidi.cpp \
+    $$DRAPE_DIR/framebuffer.cpp \
     $$DRAPE_DIR/glconstants.cpp \
     $$DRAPE_DIR/glextensions_list.cpp \
     $$DRAPE_DIR/glstate.cpp \
@@ -35,7 +31,7 @@ SOURCES += \
     $$DRAPE_DIR/pointers.cpp \
     $$DRAPE_DIR/render_bucket.cpp \
     $$DRAPE_DIR/shader.cpp \
-    $$DRAPE_DIR/shader_def.cpp \
+    $$DRAPE_DIR/static_texture.cpp \
     $$DRAPE_DIR/stipple_pen_resource.cpp \
     $$DRAPE_DIR/support_manager.cpp \
     $$DRAPE_DIR/symbols_texture.cpp \
@@ -49,26 +45,27 @@ SOURCES += \
     $$DRAPE_DIR/utils/projection.cpp \
     $$DRAPE_DIR/utils/vertex_decl.cpp \
     $$DRAPE_DIR/vertex_array_buffer.cpp \
+    $$DRAPE_DIR/viewport.cpp \
 
 HEADERS += \
-    $$ROOT_DIR/3party/sdf_image/sdf_image.h \
-    $$ROOT_DIR/3party/stb_image/stb_image.h \
     $$DRAPE_DIR/attribute_buffer_mutator.hpp \
     $$DRAPE_DIR/attribute_provider.hpp \
     $$DRAPE_DIR/batcher.hpp \
     $$DRAPE_DIR/batcher_helpers.hpp \
+    $$DRAPE_DIR/bidi.hpp \
     $$DRAPE_DIR/binding_info.hpp \
     $$DRAPE_DIR/buffer_base.hpp \
     $$DRAPE_DIR/color.hpp \
+    $$DRAPE_DIR/constants.hpp \
     $$DRAPE_DIR/cpu_buffer.hpp \
     $$DRAPE_DIR/data_buffer.hpp \
     $$DRAPE_DIR/data_buffer_impl.hpp \
     $$DRAPE_DIR/debug_rect_renderer.hpp \
-    $$DRAPE_DIR/depth_constants.hpp \
+    $$DRAPE_DIR/drape_diagnostics.hpp \
     $$DRAPE_DIR/drape_global.hpp \
     $$DRAPE_DIR/dynamic_texture.hpp \
     $$DRAPE_DIR/font_texture.hpp \
-    $$DRAPE_DIR/fribidi.hpp \
+    $$DRAPE_DIR/framebuffer.hpp \
     $$DRAPE_DIR/glconstants.hpp \
     $$DRAPE_DIR/glextensions_list.hpp \
     $$DRAPE_DIR/glfunctions.hpp \
@@ -79,6 +76,7 @@ HEADERS += \
     $$DRAPE_DIR/glyph_manager.hpp \
     $$DRAPE_DIR/gpu_buffer.hpp \
     $$DRAPE_DIR/gpu_program.hpp \
+    $$DRAPE_DIR/gpu_program_info.hpp \
     $$DRAPE_DIR/gpu_program_manager.hpp \
     $$DRAPE_DIR/hw_texture.hpp \
     $$DRAPE_DIR/index_buffer.hpp \
@@ -92,7 +90,7 @@ HEADERS += \
     $$DRAPE_DIR/pointers.hpp \
     $$DRAPE_DIR/render_bucket.hpp \
     $$DRAPE_DIR/shader.hpp \
-    $$DRAPE_DIR/shader_def.hpp \
+    $$DRAPE_DIR/static_texture.hpp \
     $$DRAPE_DIR/stipple_pen_resource.hpp \
     $$DRAPE_DIR/support_manager.hpp \
     $$DRAPE_DIR/symbols_texture.hpp \
@@ -106,6 +104,7 @@ HEADERS += \
     $$DRAPE_DIR/utils/projection.hpp \
     $$DRAPE_DIR/utils/vertex_decl.hpp \
     $$DRAPE_DIR/vertex_array_buffer.hpp \
+    $$DRAPE_DIR/viewport.hpp \
     $$DRAPE_DIR/visual_scale.hpp \
 
 iphone*{

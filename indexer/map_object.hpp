@@ -3,6 +3,7 @@
 #include "indexer/feature_data.hpp"
 #include "indexer/feature_decl.hpp"
 #include "indexer/feature_meta.hpp"
+#include "indexer/wheelchair.hpp"
 
 #include "geometry/latlon.hpp"
 #include "geometry/mercator.hpp"
@@ -88,13 +89,15 @@ public:
   string GetWikipediaLink() const;
   string GetFlats() const;
   string GetBuildingLevels() const;
-  //@}
+  wheelchair::Type GetWheelchairType() const;
 
   // TODO(Vlad, yunikkk): Use Props enum + getters instead of direct metadata access.
   // TODO: Remove this method.
   feature::Metadata const & GetMetadata() const;
 
   bool IsPointType() const;
+  /// @returns true if object is of building type.
+  bool IsBuilding() const;
 
 protected:
   FeatureID m_featureID;
@@ -142,6 +145,10 @@ vector<Props> MetadataToProps(vector<T> const & metadata)
     case Metadata::FMD_HEIGHT:
     case Metadata::FMD_MIN_HEIGHT:
     case Metadata::FMD_DENOMINATION:
+    case Metadata::FMD_SPONSORED_ID:
+    case Metadata::FMD_PRICE_RATE:
+    case Metadata::FMD_RATING:
+    case Metadata::FMD_BANNER_URL:
     case Metadata::FMD_TEST_ID:
     case Metadata::FMD_COUNT:
       break;

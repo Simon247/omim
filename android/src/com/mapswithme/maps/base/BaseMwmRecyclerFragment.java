@@ -1,7 +1,11 @@
 package com.mapswithme.maps.base;
 
+import android.content.Context;
 import android.os.Bundle;
+import android.support.annotation.CallSuper;
 import android.support.annotation.LayoutRes;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
@@ -11,13 +15,16 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import com.mapswithme.maps.R;
+import com.mapswithme.maps.widget.PlaceholderView;
 import com.mapswithme.util.UiUtils;
 import com.mapswithme.util.Utils;
 
 public abstract class BaseMwmRecyclerFragment extends Fragment
 {
   private Toolbar mToolbar;
-  protected RecyclerView mRecycler;
+  @Nullable
+  private RecyclerView mRecycler;
+  private PlaceholderView mPlaceholder;
 
   protected abstract RecyclerView.Adapter createAdapter();
 
@@ -26,9 +33,17 @@ public abstract class BaseMwmRecyclerFragment extends Fragment
     return R.layout.fragment_recycler;
   }
 
+  @Nullable
   protected RecyclerView.Adapter getAdapter()
   {
-    return mRecycler.getAdapter();
+    return mRecycler != null ? mRecycler.getAdapter() : null;
+  }
+
+  @Override
+  public void onAttach(Context context)
+  {
+    super.onAttach(context);
+    Utils.detachFragmentIfCoreNotInitialized(context, this);
   }
 
   @Override
@@ -37,6 +52,7 @@ public abstract class BaseMwmRecyclerFragment extends Fragment
     return inflater.inflate(getLayoutRes(), container, false);
   }
 
+  @CallSuper
   @Override
   public void onViewCreated(View view, Bundle savedInstanceState)
   {
@@ -61,8 +77,12 @@ public abstract class BaseMwmRecyclerFragment extends Fragment
       throw new IllegalStateException("RecyclerView not found in layout");
 
     LinearLayoutManager manager = new LinearLayoutManager(view.getContext());
+    manager.setSmoothScrollbarEnabled(true);
     mRecycler.setLayoutManager(manager);
     mRecycler.setAdapter(createAdapter());
+
+    mPlaceholder = (PlaceholderView) view.findViewById(R.id.placeholder);
+    setupPlaceholder(mPlaceholder);
   }
 
   public Toolbar getToolbar()
@@ -90,8 +110,16 @@ public abstract class BaseMwmRecyclerFragment extends Fragment
     org.alohalytics.Statistics.logEvent("$onPause", this.getClass().getSimpleName());
   }
 
-  public BaseMwmFragmentActivity getMwmActivity()
+  protected void setupPlaceholder(@NonNull PlaceholderView placeholder) {}
+
+  public void setupPlaceholder()
   {
-    return (BaseMwmFragmentActivity) getActivity();
+    setupPlaceholder(mPlaceholder);
+  }
+
+  public void showPlaceholder(boolean show)
+  {
+    if (mPlaceholder != null)
+      UiUtils.showIf(show, mPlaceholder);
   }
 }

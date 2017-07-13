@@ -6,31 +6,37 @@
 #include "drape/pointers.hpp"
 #include "drape/texture_manager.hpp"
 
+#include "traffic/speed_groups.hpp"
+
 #include "geometry/polyline2d.hpp"
 
-#include "std/function.hpp"
+#include <functional>
+#include <unordered_map>
+#include <vector>
 
 namespace df
 {
-
 class RouteBuilder
 {
 public:
   using TFlushRouteFn = function<void(drape_ptr<RouteData> &&)>;
-  using TFlushRouteSignFn = function<void(drape_ptr<RouteSignData> &&)>;
+  using TFlushRouteArrowsFn = function<void(drape_ptr<RouteArrowsData> &&)>;
 
   RouteBuilder(TFlushRouteFn const & flushRouteFn,
-               TFlushRouteSignFn const & flushRouteSignFn);
+               TFlushRouteArrowsFn const & flushRouteArrowsFn);
 
-  void Build(m2::PolylineD const & routePolyline, vector<double> const & turns,
-             df::ColorConstant color, ref_ptr<dp::TextureManager> textures);
+  void Build(dp::DrapeID subrouteId, drape_ptr<Subroute> && subroute,
+             ref_ptr<dp::TextureManager> textures, int recacheId);
 
-  void BuildSign(m2::PointD const & pos, bool isStart, bool isValid,
-                 ref_ptr<dp::TextureManager> textures);
+  void BuildArrows(dp::DrapeID subrouteId, std::vector<ArrowBorders> const & borders,
+                   ref_ptr<dp::TextureManager> textures, int recacheId);
+
+  void ClearRouteCache();
 
 private:
   TFlushRouteFn m_flushRouteFn;
-  TFlushRouteSignFn m_flushRouteSignFn;
-};
+  TFlushRouteArrowsFn m_flushRouteArrowsFn;
 
-} // namespace df
+  std::unordered_map<dp::DrapeID, m2::PolylineD> m_routeCache;
+};
+}  // namespace df

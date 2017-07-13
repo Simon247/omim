@@ -7,21 +7,17 @@ import android.graphics.Color;
 import android.location.Location;
 import android.net.Uri;
 import android.os.Bundle;
+import android.support.annotation.CallSuper;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.annotation.StringRes;
 import android.text.TextUtils;
-import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
-
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.util.List;
 
 import com.mapswithme.maps.MwmActivity.MapTask;
 import com.mapswithme.maps.MwmActivity.OpenUrlTask;
@@ -32,19 +28,28 @@ import com.mapswithme.maps.bookmarks.data.BookmarkManager;
 import com.mapswithme.maps.downloader.CountryItem;
 import com.mapswithme.maps.downloader.MapManager;
 import com.mapswithme.maps.location.LocationHelper;
+import com.mapswithme.maps.location.LocationListener;
 import com.mapswithme.maps.search.SearchEngine;
 import com.mapswithme.util.ConnectionState;
 import com.mapswithme.util.Constants;
 import com.mapswithme.util.StringUtils;
 import com.mapswithme.util.UiUtils;
 import com.mapswithme.util.Utils;
-import com.mapswithme.util.Yota;
 import com.mapswithme.util.concurrency.ThreadPool;
+import com.mapswithme.util.log.Logger;
+import com.mapswithme.util.log.LoggerFactory;
 import com.mapswithme.util.statistics.Statistics;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.List;
 
 @SuppressLint("StringFormatMatches")
 public class DownloadResourcesActivity extends BaseMwmFragmentActivity
 {
+  private static final Logger LOGGER = LoggerFactory.INSTANCE.getLogger(LoggerFactory.Type.DOWNLOADER);
   private static final String TAG = DownloadResourcesActivity.class.getName();
 
   static final String EXTRA_COUNTRY = "country";
@@ -96,20 +101,23 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
       new Ge0IntentProcessor(),
       new MapsWithMeIntentProcessor(),
       new GoogleMapsIntentProcessor(),
+      new LeadUrlIntentProcessor(),
       new OpenCountryTaskProcessor(),
-      new KmzKmlProcessor()
+      new KmzKmlProcessor(),
+      new ShowOnMapProcessor(),
+      new BuildRouteProcessor()
   };
 
-  private final LocationHelper.LocationListener mLocationListener = new LocationHelper.SimpleLocationListener()
+  private final LocationListener mLocationListener = new LocationListener.Simple()
   {
     @Override
-    public void onLocationUpdated(Location l)
+    public void onLocationUpdated(Location location)
     {
       if (mCurrentCountry != null)
         return;
 
-      final double lat = l.getLatitude();
-      final double lon = l.getLongitude();
+      final double lat = location.getLatitude();
+      final double lon = location.getLongitude();
       mCurrentCountry = MapManager.nativeFindCountry(lat, lon);
       if (TextUtils.isEmpty(mCurrentCountry))
       {
@@ -117,12 +125,13 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
         return;
       }
 
-      CountryItem item = CountryItem.fill(mCurrentCountry);
+      int status = MapManager.nativeGetStatus(mCurrentCountry);
+      String name = MapManager.nativeGetName(mCurrentCountry);
 
       UiUtils.show(mTvLocation);
 
-      if (item.status == CountryItem.STATUS_DONE)
-        mTvLocation.setText(String.format(getString(R.string.download_location_map_up_to_date), item.name));
+      if (status == CountryItem.STATUS_DONE)
+        mTvLocation.setText(String.format(getString(R.string.download_location_map_up_to_date), name));
       else
       {
         final CheckBox checkBox = (CheckBox) findViewById(R.id.chb__download_country);
@@ -131,22 +140,22 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
         String locationText;
         String checkBoxText;
 
-        if (item.status == CountryItem.STATUS_UPDATABLE)
+        if (status == CountryItem.STATUS_UPDATABLE)
         {
           locationText = getString(R.string.download_location_update_map_proposal);
-          checkBoxText = String.format(getString(R.string.update_country_ask), item.name);
+          checkBoxText = String.format(getString(R.string.update_country_ask), name);
         }
         else
         {
           locationText = getString(R.string.download_location_map_proposal);
-          checkBoxText = String.format(getString(R.string.download_country_ask), item.name);
+          checkBoxText = String.format(getString(R.string.download_country_ask), name);
         }
 
         mTvLocation.setText(locationText);
         checkBox.setText(checkBoxText);
       }
 
-      LocationHelper.INSTANCE.removeLocationListener(this);
+      LocationHelper.INSTANCE.removeListener(this);
     }
   };
 
@@ -194,7 +203,7 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
           return;
 
         case CountryItem.STATUS_FAILED:
-          MapManager.showError(DownloadResourcesActivity.this, item);
+          MapManager.showError(DownloadResourcesActivity.this, item, null);
           return;
         }
       }
@@ -207,30 +216,36 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
     }
   };
 
+  @CallSuper
   @Override
-  protected void onCreate(Bundle savedInstanceState)
+  protected void onCreate(@Nullable Bundle savedInstanceState)
   {
     super.onCreate(savedInstanceState);
-
-    Utils.keepScreenOn(true, getWindow());
-    suggestRemoveLiteOrSamsung();
-    dispatchIntent();
     setContentView(R.layout.activity_download_resources);
     initViewsAndListeners();
 
-    if (prepareFilesDownload())
+    if (prepareFilesDownload(false))
     {
+      Utils.keepScreenOn(true, getWindow());
+      suggestRemoveLiteOrSamsung();
+
       setAction(DOWNLOAD);
 
       if (ConnectionState.isWifiConnected())
         onDownloadClicked();
+
+      return;
     }
+
+    dispatchIntent();
+    showMap();
   }
 
   @Override
   protected void onDestroy()
   {
     super.onDestroy();
+    Utils.keepScreenOn(false, getWindow());
     if (mCountryDownloadListenerSlot != 0)
     {
       MapManager.nativeUnsubscribe(mCountryDownloadListenerSlot);
@@ -238,24 +253,25 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
     }
   }
 
+  @CallSuper
   @Override
   protected void onResume()
   {
     super.onResume();
-    LocationHelper.INSTANCE.addLocationListener(mLocationListener, true);
+    if (!isFinishing())
+      LocationHelper.INSTANCE.addListener(mLocationListener, true);
   }
 
   @Override
   protected void onPause()
   {
     super.onPause();
-    LocationHelper.INSTANCE.removeLocationListener(mLocationListener);
+    LocationHelper.INSTANCE.removeListener(mLocationListener);
   }
 
   private void suggestRemoveLiteOrSamsung()
   {
-    if (!Yota.isFirstYota() &&
-        (Utils.isPackageInstalled(Constants.Package.MWM_LITE_PACKAGE) || Utils.isPackageInstalled(Constants.Package.MWM_SAMSUNG_PACKAGE)))
+    if (Utils.isPackageInstalled(Constants.Package.MWM_LITE_PACKAGE) || Utils.isPackageInstalled(Constants.Package.MWM_SAMSUNG_PACKAGE))
       Toast.makeText(this, R.string.suggest_uninstall_lite, Toast.LENGTH_LONG).show();
   }
 
@@ -264,14 +280,15 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
     mTvMessage.setText(getString(R.string.download_resources, StringUtils.getFileSizeString(bytesToDownload)));
   }
 
-  private boolean prepareFilesDownload()
+  private boolean prepareFilesDownload(boolean showMap)
   {
     final int bytes = nativeGetBytesToDownload();
-
     if (bytes == 0)
     {
       mAreResourcesDownloaded = true;
-      showMap();
+      if (showMap)
+        showMap();
+
       return false;
     }
 
@@ -382,7 +399,7 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
 
   private void onTryAgainClicked()
   {
-    if (prepareFilesDownload())
+    if (prepareFilesDownload(true))
     {
       setAction(PAUSE);
       doDownload();
@@ -427,6 +444,8 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
     if (mMapTaskToForward != null)
     {
       intent.putExtra(MwmActivity.EXTRA_TASK, mMapTaskToForward);
+      intent.putExtra(MwmActivity.EXTRA_LAUNCH_BY_DEEP_LINK,
+                      mMapTaskToForward instanceof OpenUrlTask);
       mMapTaskToForward = null;
     }
 
@@ -476,12 +495,13 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
     if (intent == null)
       return false;
 
+    final Intent extra = intent.getParcelableExtra(SplashActivity.EXTRA_INTENT);
+    if (extra == null)
+      return false;
+
     for (final IntentProcessor ip : mIntentProcessors)
-      if (ip.isSupported(intent))
-      {
-        ip.process(intent);
+      if (ip.isSupported(extra) && ip.process(extra))
         return true;
-      }
 
     return false;
   }
@@ -498,7 +518,7 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
     public boolean process(Intent intent)
     {
       final String url = intent.getData().toString();
-      Log.i(TAG, "Query = " + url);
+      LOGGER.i(TAG, "Query = " + url);
       mMapTaskToForward = new OpenUrlTask(url);
       org.alohalytics.Statistics.logEvent("GeoIntentProcessor::process", url);
       return true;
@@ -517,7 +537,7 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
     public boolean process(Intent intent)
     {
       final String url = intent.getData().toString();
-      Log.i(TAG, "URL = " + url);
+      LOGGER.i(TAG, "URL = " + url);
       mMapTaskToForward = new OpenUrlTask(url);
       org.alohalytics.Statistics.logEvent("Ge0IntentProcessor::process", url);
       return true;
@@ -543,7 +563,7 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
     public boolean process(Intent intent)
     {
       final Uri data = intent.getData();
-      Log.i(TAG, "URL = " + data.toString());
+      LOGGER.i(TAG, "URL = " + data.toString());
 
       final String ge0Url = "ge0:/" + data.getPath();
       mMapTaskToForward = new OpenUrlTask(ge0Url);
@@ -598,9 +618,38 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
     public boolean process(Intent intent)
     {
       final String url = intent.getData().toString();
-      Log.i(TAG, "URL = " + url);
+      LOGGER.i(TAG, "URL = " + url);
       mMapTaskToForward = new OpenUrlTask(url);
       org.alohalytics.Statistics.logEvent("GoogleMapsIntentProcessor::process", url);
+      return true;
+    }
+  }
+
+  private class LeadUrlIntentProcessor implements IntentProcessor
+  {
+    @Override
+    public boolean isSupported(Intent intent)
+    {
+      final Uri data = intent.getData();
+
+      if (data == null)
+        return false;
+
+      String scheme = intent.getScheme();
+      String host = data.getHost();
+      if (TextUtils.isEmpty(scheme) || TextUtils.isEmpty(host))
+        return false;
+
+      return (scheme.equals("mapsme") || scheme.equals("mapswithme")) && "lead".equals(host);
+    }
+
+    @Override
+    public boolean process(Intent intent)
+    {
+      final String url = intent.getData().toString();
+      LOGGER.i(TAG, "URL = " + url);
+      mMapTaskToForward = new OpenUrlTask(url);
+      org.alohalytics.Statistics.logEvent("LeadUrlIntentProcessor::process", url);
       return true;
     }
   }
@@ -698,7 +747,7 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
           }
         } catch (final Exception ex)
         {
-          Log.w(TAG, "Attachment not found or io error: " + ex);
+          LOGGER.w(TAG, "Attachment not found or io error: " + ex, ex);
         } finally
         {
           Utils.closeStream(input);
@@ -711,11 +760,11 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
       boolean result = false;
       if (path != null)
       {
-        Log.d(TAG, "Loading bookmarks file from: " + path);
+        LOGGER.d(TAG, "Loading bookmarks file from: " + path);
         result = BookmarkManager.nativeLoadKmzFile(path);
       }
       else
-        Log.w(TAG, "Can't get bookmarks file from URI: " + mData);
+        LOGGER.w(TAG, "Can't get bookmarks file from URI: " + mData);
 
       if (tmpFile != null)
         //noinspection ResultOfMethodCallIgnored
@@ -738,6 +787,89 @@ public class DownloadResourcesActivity extends BaseMwmFragmentActivity
       else
         return null;
     }
+  }
+
+  private class ShowOnMapProcessor implements IntentProcessor
+  {
+    private static final String ACTION_SHOW_ON_MAP = "com.mapswithme.maps.pro.action.SHOW_ON_MAP";
+    private static final String EXTRA_LAT = "lat";
+    private static final String EXTRA_LON = "lon";
+
+    @Override
+    public boolean isSupported(Intent intent)
+    {
+      return ACTION_SHOW_ON_MAP.equals(intent.getAction());
+    }
+
+    @Override
+    public boolean process(Intent intent)
+    {
+      if (!intent.hasExtra(EXTRA_LAT) || !intent.hasExtra(EXTRA_LON))
+        return false;
+
+      double lat = getCoordinateFromIntent(intent, EXTRA_LAT);
+      double lon = getCoordinateFromIntent(intent, EXTRA_LON);
+      mMapTaskToForward = new MwmActivity.ShowPointTask(lat, lon);
+
+      return true;
+    }
+  }
+
+  private class BuildRouteProcessor implements IntentProcessor
+  {
+    private static final String ACTION_BUILD_ROUTE = "com.mapswithme.maps.pro.action.BUILD_ROUTE";
+    private static final String EXTRA_LAT_TO = "lat_to";
+    private static final String EXTRA_LON_TO = "lon_to";
+    private static final String EXTRA_LAT_FROM = "lat_from";
+    private static final String EXTRA_LON_FROM = "lon_from";
+    private static final String EXTRA_ROUTER = "router";
+
+    @Override
+    public boolean isSupported(Intent intent)
+    {
+      return ACTION_BUILD_ROUTE.equals(intent.getAction());
+    }
+
+    @Override
+    public boolean process(Intent intent)
+    {
+      if (!intent.hasExtra(EXTRA_LAT_TO) || !intent.hasExtra(EXTRA_LON_TO))
+        return false;
+
+      double latTo = getCoordinateFromIntent(intent, EXTRA_LAT_TO);
+      double lonTo = getCoordinateFromIntent(intent, EXTRA_LON_TO);
+      boolean hasFrom = intent.hasExtra(EXTRA_LAT_FROM) && intent.hasExtra(EXTRA_LON_FROM);
+      boolean hasRouter = intent.hasExtra(EXTRA_ROUTER);
+
+      if (hasFrom && hasRouter)
+      {
+        double latFrom = getCoordinateFromIntent(intent, EXTRA_LAT_FROM);
+        double lonFrom = getCoordinateFromIntent(intent, EXTRA_LON_FROM);
+        mMapTaskToForward = new MwmActivity.BuildRouteTask(latTo, lonTo, latFrom,lonFrom,
+                                                           intent.getStringExtra(EXTRA_ROUTER));
+      }
+      else if (hasFrom)
+      {
+        double latFrom = getCoordinateFromIntent(intent, EXTRA_LAT_FROM);
+        double lonFrom = getCoordinateFromIntent(intent, EXTRA_LON_FROM);
+        mMapTaskToForward = new MwmActivity.BuildRouteTask(latTo, lonTo, latFrom,lonFrom);
+      }
+      else
+      {
+        mMapTaskToForward = new MwmActivity.BuildRouteTask(latTo, lonTo);
+      }
+
+      return true;
+    }
+  }
+
+  private static double getCoordinateFromIntent(@NonNull Intent intent, @NonNull String key)
+  {
+    double value = intent.getDoubleExtra(key, 0.0);
+    if (Double.compare(value, 0.0) == 0)
+      value = intent.getFloatExtra(key, 0.0f);
+
+    return value;
   }
 
   private static native int nativeGetBytesToDownload();

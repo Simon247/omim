@@ -36,11 +36,8 @@ JNIEXPORT void JNICALL
 Java_com_mapswithme_maps_bookmarks_data_BookmarkManager_nativeShowBookmarkOnMap(
     JNIEnv * env, jobject thiz, jint c, jint b)
 {
-  BookmarkAndCategory bnc = BookmarkAndCategory(c,b);
-  g_framework->PostDrapeTask([bnc]()
-  {
-    frm()->ShowBookmark(bnc);
-  });
+  BookmarkAndCategory bnc = BookmarkAndCategory(b, c);
+  frm()->ShowBookmark(bnc);
 }
 
 JNIEXPORT void JNICALL
@@ -94,7 +91,7 @@ Java_com_mapswithme_maps_bookmarks_data_BookmarkManager_nativeSaveToKmzFile(
   BookmarkCategory * pCat = frm()->GetBmCategory(catID);
   if (pCat)
   {
-    string const name = pCat->GetName();
+    std::string const name = pCat->GetName();
     if (CreateZipFromPathDeflatedAndDefaultCompression(pCat->GetFileName(), ToNativeString(env, tmpPath) + name + ".kmz"))
       return ToJavaString(env, name);
   }
@@ -112,7 +109,7 @@ Java_com_mapswithme_maps_bookmarks_data_BookmarkManager_nativeAddBookmarkToLastE
   size_t const lastEditedCategory = f->LastEditedBMCategory();
   size_t const createdBookmarkIndex = f->AddBookmark(lastEditedCategory, glbPoint, bmkData);
   place_page::Info & info = g_framework->GetPlacePageInfo();
-  info.m_bac = {lastEditedCategory, createdBookmarkIndex};
+  info.m_bac = {createdBookmarkIndex, lastEditedCategory};
   return usermark_helper::CreateMapObject(env, info);
 }
 
@@ -126,8 +123,8 @@ Java_com_mapswithme_maps_bookmarks_data_BookmarkManager_getLastEditedCategory(
 JNIEXPORT jstring JNICALL
 Java_com_mapswithme_maps_bookmarks_data_BookmarkManager_nativeGenerateUniqueFileName(JNIEnv * env, jclass thiz, jstring jBaseName)
 {
-  string baseName = ToNativeString(env, jBaseName);
-  string bookmarkFileName = BookmarkCategory::GenerateUniqueFileName(GetPlatform().SettingsDir(), baseName);
+  std::string baseName = ToNativeString(env, jBaseName);
+  std::string bookmarkFileName = BookmarkCategory::GenerateUniqueFileName(GetPlatform().SettingsDir(), baseName);
   return ToJavaString(env, bookmarkFileName);
 }
 

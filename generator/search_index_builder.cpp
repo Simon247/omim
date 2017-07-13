@@ -1,8 +1,10 @@
 #include "search_index_builder.hpp"
 
+#include "search/common.hpp"
 #include "search/reverse_geocoder.hpp"
 #include "search/search_index_values.hpp"
 #include "search/search_trie.hpp"
+#include "search/types_skipper.hpp"
 
 #include "indexer/categories_holder.hpp"
 #include "indexer/classificator.hpp"
@@ -16,9 +18,6 @@
 #include "indexer/search_delimiters.hpp"
 #include "indexer/search_string_utils.hpp"
 #include "indexer/trie_builder.hpp"
-#include "indexer/types_skipper.hpp"
-
-#include "search/search_common.hpp"
 
 #include "defines.hpp"
 
@@ -36,12 +35,14 @@
 #include "base/string_utils.hpp"
 #include "base/timer.hpp"
 
-#include "std/algorithm.hpp"
-#include "std/fstream.hpp"
-#include "std/initializer_list.hpp"
-#include "std/limits.hpp"
-#include "std/unordered_map.hpp"
-#include "std/vector.hpp"
+#include <algorithm>
+#include <fstream>
+#include <initializer_list>
+#include <limits>
+#include <unordered_map>
+#include <vector>
+
+using namespace std;
 
 #define SYNONYMS_FILE "synonyms.txt"
 
@@ -62,7 +63,7 @@ public:
 
     while (stream.good())
     {
-      std::getline(stream, line);
+      getline(stream, line);
       if (line.empty())
         continue;
 
@@ -101,6 +102,7 @@ void GetCategoryTypes(CategoriesHolder const & categories, pair<int, int> const 
                       feature::TypesHolder const & types, vector<uint32_t> & result)
 {
   Classificator const & c = classif();
+  auto const & invisibleChecker = ftypes::IsInvisibleIndexedChecker::Instance();
 
   for (uint32_t t : types)
   {
@@ -113,9 +115,21 @@ void GetCategoryTypes(CategoriesHolder const & categories, pair<int, int> const 
     if (!categories.IsTypeExist(t))
       continue;
 
+    // There are some special non-drawable types we plan to search on.
+    if (invisibleChecker.IsMatched(t))
+    {
+      result.push_back(t);
+      continue;
+    }
+
     // Index only those types that are visible.
-    pair<int, int> const r = feature::GetDrawableScaleRange(t);
-    CHECK(r.first <= r.second && r.first != -1, (c.GetReadableObjectName(t)));
+    pair<int, int> r = feature::GetDrawableScaleRange(t);
+    CHECK_LESS_OR_EQUAL(r.first, r.second, (c.GetReadableObjectName(t)));
+
+    // Drawable scale must be normalized to indexer scales.
+    r.second = min(r.second, scales::GetUpperScale());
+    r.first = min(r.first, r.second);
+    CHECK(r.first != -1, (c.GetReadableObjectName(t)));
 
     if (r.second >= scaleRange.first && r.first <= scaleRange.second)
       result.push_back(t);
@@ -137,17 +151,16 @@ struct FeatureNameInserter
   {
   }
 
-  void AddToken(signed char lang, strings::UniString const & s) const
+  void AddToken(uint8_t lang, strings::UniString const & s) const
   {
     strings::UniString key;
     key.reserve(s.size() + 1);
-    key.push_back(static_cast<uint8_t>(lang));
+    key.push_back(lang);
     key.append(s.begin(), s.end());
 
     m_keyValuePairs.emplace_back(key, m_val);
   }
 
-public:
   bool operator()(signed char lang, string const & name) const
   {
     strings::UniString const uniName = search::NormalizeAndSimplifyString(name);
@@ -172,33 +185,19 @@ public:
       tokens.resize(maxTokensCount);
     }
 
-    // Streets are a special case: we do not add the token "street" and its
-    // synonyms when the feature's name contains it because in
-    // the search phase this part of the query will be matched against the
-    // "street" in the categories branch of the search index.
-    // However, we still add it when there are two or more street tokens
-    // ("avenue st", "улица набережная").
-
-    size_t const tokensCount = tokens.size();
-    size_t numStreetTokens = 0;
-    vector<bool> isStreet(tokensCount);
-    for (size_t i = 0; i < tokensCount; ++i)
+    if (m_hasStreetType)
     {
-      if (search::IsStreetSynonym(tokens[i]))
-      {
-        isStreet[i] = true;
-        ++numStreetTokens;
-      }
+      search::StreetTokensFilter filter([&](strings::UniString const & token, size_t /* tag */)
+                                        {
+                                          AddToken(lang, token);
+                                        });
+      for (auto const & token : tokens)
+        filter.Put(token, false /* isPrefix */, 0 /* tag */);
     }
-
-    for (size_t i = 0; i < tokensCount; ++i)
+    else
     {
-      if (numStreetTokens == 1 && isStreet[i] && m_hasStreetType)
-      {
-        //LOG(LDEBUG, ("Skipping token:", tokens[i], "in", name));
-        continue;
-      }
-      AddToken(lang, tokens[i]);
+      for (auto const & token : tokens)
+        AddToken(lang, token);
     }
 
     return true;
@@ -213,8 +212,7 @@ struct ValueBuilder<FeatureWithRankAndCenter>
 {
   ValueBuilder() = default;
 
-  void MakeValue(FeatureType const & ft, feature::TypesHolder const & types, uint32_t index,
-                 FeatureWithRankAndCenter & v) const
+  void MakeValue(FeatureType const & ft, uint32_t index, FeatureWithRankAndCenter & v) const
   {
     v.m_featureId = index;
 
@@ -229,8 +227,7 @@ struct ValueBuilder<FeatureIndexValue>
 {
   ValueBuilder() = default;
 
-  void MakeValue(FeatureType const & /* f */, feature::TypesHolder const & /* types */,
-                 uint32_t index, FeatureIndexValue & value) const
+  void MakeValue(FeatureType const & /* f */, uint32_t index, FeatureIndexValue & value) const
   {
     value.m_featureId = index;
   }
@@ -262,22 +259,36 @@ public:
 
   void operator() (FeatureType const & f, uint32_t index) const
   {
+    using namespace search;
+
+    static TypesSkipper skipIndex;
+
     feature::TypesHolder types(f);
 
-    static search::TypesSkipper skipIndex;
-
-    skipIndex.SkipTypes(types);
-    if (types.Empty())
-      return;
-
     auto const & streetChecker = ftypes::IsStreetChecker::Instance();
-    bool hasStreetType = streetChecker(types);
+    bool const hasStreetType = streetChecker(types);
 
     // Init inserter with serialized value.
     // Insert synonyms only for countries and states (maybe will add cities in future).
     FeatureNameInserter<TKey, TValue> inserter(
         skipIndex.IsCountryOrState(types) ? m_synonyms : nullptr, m_keyValuePairs, hasStreetType);
-    m_valueBuilder.MakeValue(f, types, index, inserter.m_val);
+    m_valueBuilder.MakeValue(f, index, inserter.m_val);
+
+    string const postcode = f.GetMetadata().Get(feature::Metadata::FMD_POSTCODE);
+    if (!postcode.empty())
+    {
+      // See OSM TagInfo or Wiki about modern postcodes format. The
+      // mean number of tokens is less than two.
+      buffer_vector<strings::UniString, 2> tokens;
+      SplitUniString(NormalizeAndSimplifyString(postcode), MakeBackInsertFunctor(tokens),
+                     Delimiters());
+      for (auto const & token : tokens)
+        inserter.AddToken(kPostcodesLang, token);
+    }
+
+    skipIndex.SkipTypes(types);
+    if (types.Empty())
+      return;
 
     // Skip types for features without names.
     if (!f.ForEachName(inserter))
@@ -292,7 +303,7 @@ public:
 
     // add names of categories of the feature
     for (uint32_t t : categoryTypes)
-      inserter.AddToken(search::kCategoriesLang, search::FeatureTypeToString(c.GetIndexForType(t)));
+      inserter.AddToken(kCategoriesLang, FeatureTypeToString(c.GetIndexForType(t)));
   }
 };
 
@@ -334,7 +345,7 @@ void BuildAddressTable(FilesContainerR & container, Writer & writer)
       feature::AddressData data;
       data.Deserialize(src);
 
-      size_t streetIndex;
+      size_t streetIndex = 0;
       bool streetMatched = false;
       strings::UniString const street = search::GetStreetNameAsKey(data.Get(feature::AddressData::STREET));
       if (!street.empty())
@@ -360,7 +371,7 @@ void BuildAddressTable(FilesContainerR & container, Writer & writer)
         ++address;
       }
       if (streetMatched)
-        building2Street.PushBack(streetIndex);
+        building2Street.PushBack(base::checked_cast<decltype(building2Street)::ValueType>(streetIndex));
       else
         building2Street.PushBackUndefined();
     }
@@ -382,7 +393,7 @@ bool BuildSearchIndexFromDataFile(string const & filename, bool forceRebuild)
 {
   Platform & platform = GetPlatform();
 
-  FilesContainerR readContainer(platform.GetReader(filename));
+  FilesContainerR readContainer(platform.GetReader(filename, "f"));
   if (readContainer.IsExist(SEARCH_INDEX_FILE_TAG) && !forceRebuild)
     return true;
 

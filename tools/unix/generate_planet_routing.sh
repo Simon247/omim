@@ -14,6 +14,9 @@ if [ $# -lt 1 ]; then
   echo "  $0 pbf"
   echo "  $0 prepare"
   echo "  $0 mwm"
+  echo "  $0 online"
+  echo "  $0 serve"
+  echo "  $0 stop"
   echo ''
   exit 1
 fi
@@ -54,7 +57,7 @@ if [ "$1" == "pbf" ]; then
   export PLANET
   export INTDIR
   find "$TMPBORDERS" -maxdepth 1 -name '*.poly' -print0 | xargs -0 -P $NUM_PROCESSES -I % \
-    sh -c '"$OSMCTOOLS/osmconvert" "$PLANET" --hash-memory=2000 -B="%" --complex-ways --out-pbf -o="$INTDIR/$(basename "%" .poly).pbf"'
+    sh -c '"$OSMCTOOLS/osmconvert" "$PLANET" --hash-memory=2000 -B="%" --complete-ways --out-pbf -o="$INTDIR/$(basename "%" .poly).pbf"'
   rm -r "$TMPBORDERS"
 
 elif [ "$1" == "prepare" ]; then
@@ -110,13 +113,14 @@ elif [ "$1" == "mwm" ]; then
 
   # Xargs has 255 chars limit for exec string, so we use short variable names.
   export G="$GENERATOR_TOOL"
-  export K="--make_routing --make_cross_section"
+  export K="--make_routing --make_cross_section --make_routing_index --generate_traffic_keys"
+  export I="--intermediate_data_path=$INTDIR"
   export TARGET
   export LOG_PATH
   export DATA_PATH
   set +e
   find "$INTDIR" -maxdepth 1 -name '*.osrm' -print0 | xargs -0 -P $NUM_PROCESSES -I % \
-    sh -c 'O="%"; B="$(basename "$O" .osrm)"; "$G" $K --osrm_file_name="$O" --data_path="$TARGET" --user_resource_path="$DATA_PATH" --output="$B" 2>> "$LOG_PATH/$B.log"'
+    sh -c 'O="%"; B="$(basename "$O" .osrm)"; "$G" $K "$I" --osrm_file_name="$O" --data_path="$TARGET" --user_resource_path="$DATA_PATH" --output="$B" 2>> "$LOG_PATH/$B.log"'
   set -e
 
   if [ -n "${POLY_DIR-}" ]; then
@@ -126,6 +130,11 @@ elif [ "$1" == "mwm" ]; then
       rmdir "$POLY_DIR"
     fi
   fi
+
+elif [ "$1" == "stop" ]; then
+  LOG="$LOG_PATH/planet.log"
+  echo "Stopping osrm server..." >> "$LOG"
+  pkill osrm-routed || true
 
 elif [ "$1" == "online" ]; then
   PLANET="${PLANET:-$HOME/planet/planet-latest.o5m}"
@@ -163,6 +172,32 @@ elif [ "$1" == "online" ]; then
   else
       echo "Failed to create $OSRM_FILE" >> "$LOG"
   fi
+
+elif [ "$1" == "serve" ]; then
+  OSRM_PATH="${OSRM_PATH:-$OMIM_PATH/3party/osrm/osrm-backend}"
+  OSRM_BUILD_PATH="${OSRM_BUILD_PATH:-$OMIM_PATH/../osrm-backend-release}"
+  [ ! -x "$OSRM_BUILD_PATH/osrm-extract" ] && fail "Please compile OSRM binaries to $OSRM_BUILD_PATH"
+
+  OSRM_THREADS=${OSRM_THREADS:-15}
+  OSRM_MEMORY=${OSRM_MEMORY:-50}
+
+  export STXXLCFG="$HOME/.stxxl"
+  OSRM_FILE="$INTDIR/planet.osrm"
+  PORT="10012"
+  RESTRICTIONS_FILE="$OSRM_FILE.restrictions"
+  LOG="$LOG_PATH/planet.log"
+  if [ -s "$OSRM_FILE" ]; then
+    echo "Starting: $OSRM_FILE"
+    "$OSRM_BUILD_PATH/osrm-routed" "$OSRM_FILE" --borders "$OMIM_PATH/data/" --port "$PORT" >> "$LOG" 2>&1 &
+
+    echo "Waiting until OSRM server starts:"
+    until $(curl --output /dev/null --silent --head --fail http://localhost:$PORT/mapsme); do
+      printf '.' >> "$LOG"
+      sleep 5
+    done
+   else
+    echo "Can't find OSRM file: $OSRM_FILE"
+ fi
 
 else
   fail "Incorrect parameter: $1"

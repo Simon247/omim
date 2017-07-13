@@ -1,8 +1,8 @@
 #pragma once
 
-#include "osrm_engine.hpp"
-#include "osrm_router.hpp"
-#include "router.hpp"
+#include "routing/cross_mwm_router.hpp"
+#include "routing/osrm_engine.hpp"
+#include "routing/router.hpp"
 
 #include "indexer/index.hpp"
 
@@ -17,7 +17,7 @@
 namespace routing
 {
 /// OSRM graph node representation with graph mwm name and border crossing point.
-struct CrossNode
+struct CrossNode final
 {
   NodeID node;
   NodeID reverseNode;
@@ -35,7 +35,13 @@ struct CrossNode
   {
   }
 
-  CrossNode() : node(INVALID_NODE_ID), reverseNode(INVALID_NODE_ID), point(ms::LatLon::Zero()) {}
+  CrossNode()
+    : node(INVALID_NODE_ID)
+    , reverseNode(INVALID_NODE_ID)
+    , point(ms::LatLon::Zero())
+    , isVirtual(false)
+  {
+  }
 
   inline bool IsValid() const { return node != INVALID_NODE_ID; }
 
@@ -64,7 +70,7 @@ inline string DebugPrint(CrossNode const & t)
 }
 
 /// Representation of border crossing. Contains node on previous map and node on next map.
-struct BorderCross
+struct BorderCross final
 {
   CrossNode fromNode;
   CrossNode toNode;
@@ -72,7 +78,9 @@ struct BorderCross
   BorderCross(CrossNode const & from, CrossNode const & to) : fromNode(from), toNode(to) {}
   BorderCross() = default;
 
+  // TODO(bykoianko) Consider using fields |fromNode| and |toNode| in operator== and operator<.
   inline bool operator==(BorderCross const & a) const { return toNode == a.toNode; }
+  inline bool operator!=(BorderCross const & a) const { return !(*this == a); }
   inline bool operator<(BorderCross const & a) const { return toNode < a.toNode; }
 };
 
@@ -83,65 +91,41 @@ inline string DebugPrint(BorderCross const & t)
   return out.str();
 }
 
-/// A class which represents an cross mwm weighted edge used by CrossMwmGraph.
-class CrossWeightedEdge
+/// A class which represents an cross mwm weighted edge used by CrossMwmRoadGraph.
+class CrossWeightedEdge final
 {
 public:
-  CrossWeightedEdge(BorderCross const & target, double weight) : target(target), weight(weight) {}
+  CrossWeightedEdge(BorderCross const & target, double weight) : m_target(target), m_weight(weight)
+  {
+  }
 
-  inline BorderCross const & GetTarget() const { return target; }
-  inline double GetWeight() const { return weight; }
+  BorderCross const & GetTarget() const { return m_target; }
+  double GetWeight() const { return m_weight; }
+
+  bool operator==(CrossWeightedEdge const & a) const
+  {
+    return m_target == a.m_target && m_weight == a.m_weight;
+  }
+
+  bool operator<(CrossWeightedEdge const & a) const
+  {
+    if (m_target != a.m_target)
+      return m_target < a.m_target;
+    return m_weight < a.m_weight;
+  }
 
 private:
-  BorderCross target;
-  double weight;
+  BorderCross m_target;
+  double m_weight;
 };
 
 /// A graph used for cross mwm routing in an astar algorithms.
-class CrossMwmGraph
+class CrossMwmRoadGraph final
 {
 public:
+  using TCachingKey = pair<TWrittenNodeId, Index::MwmId>;
   using TVertexType = BorderCross;
   using TEdgeType = CrossWeightedEdge;
-
-  explicit CrossMwmGraph(RoutingIndexManager & indexManager) : m_indexManager(indexManager) {}
-
-  void GetOutgoingEdgesList(BorderCross const & v, vector<CrossWeightedEdge> & adj) const;
-  void GetIngoingEdgesList(BorderCross const & /* v */,
-                           vector<CrossWeightedEdge> & /* adj */) const
-  {
-    NOTIMPLEMENTED();
-  }
-
-  double HeuristicCostEstimate(BorderCross const & v, BorderCross const & w) const;
-
-  IRouter::ResultCode SetStartNode(CrossNode const & startNode);
-  IRouter::ResultCode SetFinalNode(CrossNode const & finalNode);
-
-private:
-  // Cashing wrapper for the ConstructBorderCrossImpl function.
-  vector<BorderCross> const & ConstructBorderCross(OutgoingCrossNode const & startNode,
-                                                   TRoutingMappingPtr const & currentMapping) const;
-
-  // Pure function to construct boder cross by outgoing cross node.
-  bool ConstructBorderCrossImpl(OutgoingCrossNode const & startNode,
-                                TRoutingMappingPtr const & currentMapping,
-                                vector<BorderCross> & cross) const;
-  /*!
-   * Adds a virtual edge to the graph so that it is possible to represent
-   * the final segment of the path that leads from the map's border
-   * to finalNode. Addition of such virtual edges for the starting node is
-   * inlined elsewhere.
-   */
-  void AddVirtualEdge(IngoingCrossNode const & node, CrossNode const & finalNode,
-                      EdgeWeight weight);
-
-  map<CrossNode, vector<CrossWeightedEdge> > m_virtualEdges;
-
-  mutable RoutingIndexManager m_indexManager;
-
-  // Caching stuff.
-  using TCachingKey = pair<TWrittenNodeId, Index::MwmId>;
 
   struct Hash
   {
@@ -151,7 +135,53 @@ private:
     }
   };
 
-  mutable unordered_map<TCachingKey, vector<BorderCross>, Hash> m_cachedNextNodes;
+  explicit CrossMwmRoadGraph(RoutingIndexManager & indexManager) : m_indexManager(indexManager) {}
+  void GetOutgoingEdgesList(BorderCross const & v, vector<CrossWeightedEdge> & adj) const
+  {
+    GetEdgesList(v, true /* isOutgoing */, adj);
+  }
+
+  void GetIngoingEdgesList(BorderCross const & v, vector<CrossWeightedEdge> & adj) const
+  {
+    GetEdgesList(v, false /* isOutgoing */, adj);
+  }
+
+  double HeuristicCostEstimate(BorderCross const & v, BorderCross const & w) const;
+
+  IRouter::ResultCode SetStartNode(CrossNode const & startNode);
+  IRouter::ResultCode SetFinalNode(CrossNode const & finalNode);
+
+  vector<BorderCross> const & ConstructBorderCross(TRoutingMappingPtr const & currentMapping,
+                                                   OutgoingCrossNode const & node) const;
+  vector<BorderCross> const & ConstructBorderCross(TRoutingMappingPtr const & currentMapping,
+                                                   IngoingCrossNode const & node) const;
+
+private:
+  // Pure function to construct boder cross by outgoing cross node.
+  bool ConstructBorderCrossByOutgoingImpl(OutgoingCrossNode const & startNode,
+                                          TRoutingMappingPtr const & currentMapping,
+                                          vector<BorderCross> & cross) const;
+  bool ConstructBorderCrossByIngoingImpl(IngoingCrossNode const & startNode,
+                                         TRoutingMappingPtr const & currentMapping,
+                                         vector<BorderCross> & crosses) const;
+
+  /*!
+   * Adds a virtual edge to the graph so that it is possible to represent
+   * the final segment of the path that leads from the map's border
+   * to finalNode. Addition of such virtual edges for the starting node is
+   * inlined elsewhere.
+   */
+  void AddVirtualEdge(IngoingCrossNode const & node, CrossNode const & finalNode,
+                      EdgeWeight weight);
+  void GetEdgesList(BorderCross const & v, bool isOutgoing, vector<CrossWeightedEdge> & adj) const;
+
+  map<CrossNode, vector<CrossWeightedEdge> > m_virtualEdges;
+
+  mutable RoutingIndexManager m_indexManager;
+
+  // @TODO(bykoianko) Consider removing key work mutable.
+  mutable unordered_map<TCachingKey, vector<BorderCross>, Hash> m_cachedNextNodesByIngoing;
+  mutable unordered_map<TCachingKey, vector<BorderCross>, Hash> m_cachedNextNodesByOutgoing;
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -159,7 +189,7 @@ private:
 //--------------------------------------------------------------------------------------------------
 
 /*!
- * \brief Convertor from CrossMwmGraph to cross mwm route task.
+ * \brief Convertor from CrossMwmRoadGraph to cross mwm route task.
  * \warning It's assumed that the first and the last BorderCrosses are always virtual and represents
  * routing inside mwm.
  */

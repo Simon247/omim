@@ -2,9 +2,9 @@
 
 #include "indexer/geometry_serialization.hpp"
 #include "geometry/mercator.hpp"
-#include "indexer/point_to_int64.hpp"
 #include "indexer/coding_params.hpp"
 
+#include "coding/point_to_integer.hpp"
 #include "coding/reader.hpp"
 #include "coding/writer.hpp"
 
@@ -64,12 +64,12 @@ namespace
     tesselator::PointsInfo points;
     m2::PointU (* D2U)(m2::PointD const &, uint32_t) = &PointD2PointU;
     info.GetPointsInfo(saver.GetBasePoint(), saver.GetMaxPoint(),
-                       bind(D2U, _1, cp.GetCoordBits()), points);
+                       std::bind(D2U, std::placeholders::_1, cp.GetCoordBits()), points);
 
     info.ProcessPortions(points, saver);
 
-    vector<char> buffer;
-    MemWriter<vector<char> > writer(buffer);
+    std::vector<char> buffer;
+    MemWriter<std::vector<char> > writer(buffer);
     saver.Save(writer);
 
     TEST ( !buffer.empty(), () );

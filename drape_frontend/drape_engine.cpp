@@ -1,27 +1,28 @@
 #include "drape_frontend/drape_engine.hpp"
+
 #include "drape_frontend/message_subclasses.hpp"
+#include "drape_frontend/gui/drape_gui.hpp"
+#include "drape_frontend/my_position_controller.hpp"
 #include "drape_frontend/visual_params.hpp"
 
-#include "drape_frontend/gui/drape_gui.hpp"
+#include "drape/support_manager.hpp"
 
-#include "storage/index.hpp"
-
-#include "drape/texture_manager.hpp"
-
-#include "platform/platform.hpp"
 #include "platform/settings.hpp"
 
-#include "std/bind.hpp"
+using namespace std::placeholders;
 
 namespace df
 {
 DrapeEngine::DrapeEngine(Params && params)
-  : m_viewport(params.m_viewport)
+  : m_myPositionModeChanged(std::move(params.m_myPositionModeChanged))
+  , m_viewport(std::move(params.m_viewport))
 {
   VisualParams::Init(params.m_vs, df::CalculateTileSize(m_viewport.GetWidth(), m_viewport.GetHeight()));
 
+  df::VisualParams::Instance().SetFontScale(params.m_fontsScaleFactor);
+
   gui::DrapeGui & guiSubsystem = gui::DrapeGui::Instance();
-  guiSubsystem.SetLocalizator(bind(&StringsBundle::GetString, params.m_stringsBundle.get(), _1));
+  guiSubsystem.SetLocalizator(std::bind(&StringsBundle::GetString, params.m_stringsBundle.get(), _1));
   guiSubsystem.SetSurfaceSize(m2::PointF(m_viewport.GetWidth(), m_viewport.GetHeight()));
 
   m_textureManager = make_unique_dp<dp::TextureManager>();
@@ -31,40 +32,79 @@ DrapeEngine::DrapeEngine(Params && params)
   location::EMyPositionMode mode = params.m_initialMyPositionMode.first;
   if (!params.m_initialMyPositionMode.second && !settings::Get(settings::kLocationStateMode, mode))
   {
-    mode = location::MODE_UNKNOWN_POSITION;
+    mode = location::PendingPosition;
   }
-  else if (mode == location::MODE_ROTATE_AND_FOLLOW)
+  else if (mode == location::FollowAndRotate)
   {
-    // If the screen rect setting in follow and rotate mode is missing or invalid, it could cause invalid animations,
-    // so the follow and rotate mode should be discarded.
+    // If the screen rect setting in follow and rotate mode is missing or invalid, it could cause
+    // invalid animations, so the follow and rotate mode should be discarded.
     m2::AnyRectD rect;
     if (!(settings::Get("ScreenClipRect", rect) && df::GetWorldRect().IsRectInside(rect.GetGlobalRect())))
-      mode = location::MODE_FOLLOW;
+      mode = location::Follow;
   }
 
-  FrontendRenderer::Params frParams(make_ref(m_threadCommutator), params.m_factory,
-                                    make_ref(m_textureManager), m_viewport,
-                                    bind(&DrapeEngine::ModelViewChanged, this, _1),
-                                    bind(&DrapeEngine::TapEvent, this, _1),
-                                    bind(&DrapeEngine::UserPositionChanged, this, _1),
-                                    bind(&DrapeEngine::MyPositionModeChanged, this, _1),
-                                    mode, make_ref(m_requestedTiles), params.m_allow3dBuildings,
-                                    params.m_blockTapEvents);
+  double timeInBackground = 0.0;
+  double lastEnterBackground = 0.0;
+  if (settings::Get("LastEnterBackground", lastEnterBackground))
+    timeInBackground = my::Timer::LocalTime() - lastEnterBackground;
 
-  m_frontend = make_unique_dp<FrontendRenderer>(frParams);
+  std::vector<PostprocessRenderer::Effect> effects;
 
-  BackendRenderer::Params brParams(frParams.m_commutator, frParams.m_oglContextFactory,
-                                   frParams.m_texMng, params.m_model,
+  bool enabledAntialiasing;
+  if (!settings::Get(dp::kSupportedAntialiasing, enabledAntialiasing))
+    enabledAntialiasing = false;
+
+  if (enabledAntialiasing)
+  {
+    LOG(LINFO, ("Antialiasing is enabled"));
+    effects.push_back(PostprocessRenderer::Antialiasing);
+  }
+
+  MyPositionController::Params mpParams(mode,
+                                        timeInBackground,
+                                        params.m_hints,
+                                        params.m_isRoutingActive,
+                                        params.m_isAutozoomEnabled,
+                                        std::bind(&DrapeEngine::MyPositionModeChanged, this, _1, _2));
+
+  FrontendRenderer::Params frParams(params.m_apiVersion,
+                                    make_ref(m_threadCommutator),
+                                    params.m_factory,
+                                    make_ref(m_textureManager),
+                                    std::move(mpParams),
+                                    m_viewport,
+                                    std::bind(&DrapeEngine::ModelViewChanged, this, _1),
+                                    std::bind(&DrapeEngine::TapEvent, this, _1),
+                                    std::bind(&DrapeEngine::UserPositionChanged, this, _1),
+                                    make_ref(m_requestedTiles),
+                                    std::move(params.m_overlaysShowStatsCallback),
+                                    params.m_allow3dBuildings,
+                                    params.m_trafficEnabled,
+                                    params.m_blockTapEvents,
+                                    std::move(effects));
+
+  m_frontend = make_unique_dp<FrontendRenderer>(std::move(frParams));
+
+  BackendRenderer::Params brParams(params.m_apiVersion,
+                                   frParams.m_commutator,
+                                   frParams.m_oglContextFactory,
+                                   frParams.m_texMng,
+                                   params.m_model,
                                    params.m_model.UpdateCurrentCountryFn(),
-                                   make_ref(m_requestedTiles), params.m_allow3dBuildings);
-  m_backend = make_unique_dp<BackendRenderer>(brParams);
+                                   make_ref(m_requestedTiles),
+                                   params.m_allow3dBuildings,
+                                   params.m_trafficEnabled,
+                                   params.m_simplifiedTrafficColors);
 
-  m_widgetsInfo = move(params.m_info);
+  m_backend = make_unique_dp<BackendRenderer>(std::move(brParams));
+
+  m_widgetsInfo = std::move(params.m_info);
 
   RecacheGui(false);
+  RecacheMapShapes();
 
   if (params.m_showChoosePositionMark)
-    EnableChoosePositionMode(true);
+    EnableChoosePositionMode(true, std::move(params.m_boundAreaTriangles), false, m2::PointD());
 
   ResizeImpl(m_viewport.GetWidth(), m_viewport.GetHeight());
 }
@@ -86,10 +126,39 @@ DrapeEngine::~DrapeEngine()
   m_textureManager->Release();
 }
 
+void DrapeEngine::Update(int w, int h)
+{
+  if (m_choosePositionMode)
+  {
+    m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                                    make_unique_dp<ShowChoosePositionMarkMessage>(),
+                                    MessagePriority::High);
+  }
+  RecacheGui(false);
+
+  RecacheMapShapes();
+
+  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
+                                  make_unique_dp<RecoverGLResourcesMessage>(),
+                                  MessagePriority::High);
+
+  ResizeImpl(w, h);
+}
+
 void DrapeEngine::Resize(int w, int h)
 {
-  if (m_viewport.GetHeight() != h || m_viewport.GetWidth() != w)
+  ASSERT_GREATER(w, 0, ());
+  ASSERT_GREATER(h, 0, ());
+  if (m_viewport.GetHeight() != static_cast<uint32_t>(h) ||
+      m_viewport.GetWidth() != static_cast<uint32_t>(w))
     ResizeImpl(w, h);
+}
+
+void DrapeEngine::SetVisibleViewport(m2::RectD const & rect) const
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
+                                  make_unique_dp<SetVisibleViewportMessage>(rect),
+                                  MessagePriority::Normal);
 }
 
 void DrapeEngine::Invalidate()
@@ -101,68 +170,98 @@ void DrapeEngine::Invalidate()
 
 void DrapeEngine::AddTouchEvent(TouchEvent const & event)
 {
-  AddUserEvent(event);
+  AddUserEvent(make_unique_dp<TouchEvent>(event));
 }
 
 void DrapeEngine::Scale(double factor, m2::PointD const & pxPoint, bool isAnim)
 {
-  AddUserEvent(ScaleEvent(factor, pxPoint, isAnim));
+  AddUserEvent(make_unique_dp<ScaleEvent>(factor, pxPoint, isAnim));
 }
 
 void DrapeEngine::SetModelViewCenter(m2::PointD const & centerPt, int zoom, bool isAnim)
 {
-  AddUserEvent(SetCenterEvent(centerPt, zoom, isAnim));
+  AddUserEvent(make_unique_dp<SetCenterEvent>(centerPt, zoom, isAnim));
 }
 
 void DrapeEngine::SetModelViewRect(m2::RectD const & rect, bool applyRotation, int zoom, bool isAnim)
 {
-  AddUserEvent(SetRectEvent(rect, applyRotation, zoom, isAnim));
+  AddUserEvent(make_unique_dp<SetRectEvent>(rect, applyRotation, zoom, isAnim));
 }
 
 void DrapeEngine::SetModelViewAnyRect(m2::AnyRectD const & rect, bool isAnim)
 {
-  AddUserEvent(SetAnyRectEvent(rect, isAnim));
+  AddUserEvent(make_unique_dp<SetAnyRectEvent>(rect, isAnim));
 }
 
-int DrapeEngine::AddModelViewListener(TModelViewListenerFn const & listener)
-{
-  static int currentSlotID = 0;
-  VERIFY(m_listeners.insert(make_pair(++currentSlotID, listener)).second, ());
-  return currentSlotID;
-}
-
-void DrapeEngine::RemoveModeViewListener(int slotID)
-{
-  m_listeners.erase(slotID);
-}
-
-void DrapeEngine::ClearUserMarksLayer(df::TileKey const & tileKey)
-{
-  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
-                                  make_unique_dp<ClearUserMarkLayerMessage>(tileKey),
-                                  MessagePriority::Normal);
-}
-
-void DrapeEngine::ChangeVisibilityUserMarksLayer(TileKey const & tileKey, bool isVisible)
-{
-  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
-                                  make_unique_dp<ChangeUserMarkLayerVisibilityMessage>(tileKey, isVisible),
-                                  MessagePriority::Normal);
-}
-
-void DrapeEngine::UpdateUserMarksLayer(TileKey const & tileKey, UserMarksProvider * provider)
+void DrapeEngine::ClearUserMarksLayer(size_t layerId)
 {
   m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
-                                  make_unique_dp<UpdateUserMarkLayerMessage>(tileKey, provider),
+                                  make_unique_dp<ClearUserMarkLayerMessage>(layerId),
                                   MessagePriority::Normal);
 }
 
-void DrapeEngine::SetRenderingEnabled(bool const isEnabled)
+void DrapeEngine::ChangeVisibilityUserMarksLayer(size_t layerId, bool isVisible)
 {
-  m_frontend->SetRenderingEnabled(isEnabled);
-  m_backend->SetRenderingEnabled(isEnabled);
+  m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                                  make_unique_dp<ChangeUserMarkLayerVisibilityMessage>(layerId, isVisible),
+                                  MessagePriority::Normal);
+}
 
-  LOG(LDEBUG, (isEnabled ? "Rendering enabled" : "Rendering disabled"));
+void DrapeEngine::UpdateUserMarksLayer(size_t layerId, UserMarksProvider * provider)
+{
+  auto marksRenderCollection = make_unique_dp<UserMarksRenderCollection>();
+  marksRenderCollection->reserve(provider->GetUserPointCount());
+  for (size_t pointIndex = 0, sz = provider->GetUserPointCount(); pointIndex < sz; ++pointIndex)
+  {
+    UserPointMark const * mark = provider->GetUserPointMark(pointIndex);
+    UserMarkRenderParams renderInfo;
+    renderInfo.m_anchor = mark->GetAnchor();
+    renderInfo.m_depth = mark->GetDepth();
+    renderInfo.m_isVisible = mark->IsVisible();
+    renderInfo.m_pivot = mark->GetPivot();
+    renderInfo.m_pixelOffset = mark->GetPixelOffset();
+    renderInfo.m_runCreationAnim = mark->HasCreationAnimation();
+    renderInfo.m_symbolName = mark->GetSymbolName();
+    marksRenderCollection->emplace_back(std::move(renderInfo));
+  }
+
+  auto linesRenderCollection = make_unique_dp<UserLinesRenderCollection>();
+  linesRenderCollection->reserve(provider->GetUserLineCount());
+  for (size_t lineIndex = 0, sz = provider->GetUserLineCount(); lineIndex < sz; ++lineIndex)
+  {
+    UserLineMark const * mark = provider->GetUserLineMark(lineIndex);
+    UserLineRenderParams renderInfo;
+    renderInfo.m_spline = m2::SharedSpline(mark->GetPoints());
+    renderInfo.m_layers.reserve(mark->GetLayerCount());
+    for (size_t layerIndex = 0, layersCount = mark->GetLayerCount(); layerIndex < layersCount; ++layerIndex)
+    {
+      renderInfo.m_layers.emplace_back(mark->GetColor(layerIndex),
+                                       mark->GetWidth(layerIndex),
+                                       mark->GetLayerDepth(layerIndex));
+    }
+    linesRenderCollection->emplace_back(std::move(renderInfo));
+  }
+  m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                                  make_unique_dp<UpdateUserMarkLayerMessage>(layerId,
+                                                                             std::move(marksRenderCollection),
+                                                                             std::move(linesRenderCollection)),
+                                  MessagePriority::Normal);
+}
+
+void DrapeEngine::SetRenderingEnabled(ref_ptr<dp::OGLContextFactory> contextFactory)
+{
+  m_backend->SetRenderingEnabled(contextFactory);
+  m_frontend->SetRenderingEnabled(contextFactory);
+
+  LOG(LDEBUG, ("Rendering enabled"));
+}
+
+void DrapeEngine::SetRenderingDisabled(bool const destroyContext)
+{
+  m_frontend->SetRenderingDisabled(destroyContext);
+  m_backend->SetRenderingDisabled(destroyContext);
+
+  LOG(LDEBUG, ("Rendering disabled"));
 }
 
 void DrapeEngine::InvalidateRect(m2::RectD const & rect)
@@ -184,75 +283,65 @@ void DrapeEngine::UpdateMapStyle()
   }
 
   // Recache gui after updating of style.
-  {
-    RecacheGui(false);
+  RecacheGui(false);
+}
 
-    m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
-                                    make_unique_dp<GuiLayerLayoutMessage>(m_widgetsLayout),
-                                    MessagePriority::High);
-  }
+void DrapeEngine::RecacheMapShapes()
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                                  make_unique_dp<MapShapesRecacheMessage>(),
+                                  MessagePriority::Normal);
+}
+
+dp::DrapeID DrapeEngine::GenerateDrapeID()
+{
+  std::lock_guard<std::mutex> lock(m_drapeIdGeneratorMutex);
+  ++m_drapeIdGenerator;
+  return m_drapeIdGenerator;
 }
 
 void DrapeEngine::RecacheGui(bool needResetOldGui)
 {
-  GuiRecacheMessage::Blocker blocker;
   m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
-                                  make_unique_dp<GuiRecacheMessage>(blocker, m_widgetsInfo,
-                                                                    m_widgetSizes, needResetOldGui),
+                                  make_unique_dp<GuiRecacheMessage>(m_widgetsInfo, needResetOldGui),
                                   MessagePriority::High);
-  blocker.Wait();
 }
 
-void DrapeEngine::AddUserEvent(UserEvent const & e)
+void DrapeEngine::AddUserEvent(drape_ptr<UserEvent> && e)
 {
-  m_frontend->AddUserEvent(e);
+  m_frontend->AddUserEvent(std::move(e));
 }
 
 void DrapeEngine::ModelViewChanged(ScreenBase const & screen)
 {
-  Platform & pl = GetPlatform();
-  pl.RunOnGuiThread(bind(&DrapeEngine::ModelViewChangedGuiThread, this, screen));
+  if (m_modelViewChanged != nullptr)
+    m_modelViewChanged(screen);
 }
 
-void DrapeEngine::ModelViewChangedGuiThread(ScreenBase const & screen)
-{
-  for (pair<int, TModelViewListenerFn> const & p : m_listeners)
-    p.second(screen);
-}
-
-void DrapeEngine::MyPositionModeChanged(location::EMyPositionMode mode)
+void DrapeEngine::MyPositionModeChanged(location::EMyPositionMode mode, bool routingActive)
 {
   settings::Set(settings::kLocationStateMode, mode);
-  GetPlatform().RunOnGuiThread([this, mode]()
-  {
-    if (m_myPositionModeChanged != nullptr)
-      m_myPositionModeChanged(mode);
-  });
+  if (m_myPositionModeChanged != nullptr)
+    m_myPositionModeChanged(mode, routingActive);
 }
 
 void DrapeEngine::TapEvent(TapInfo const & tapInfo)
 {
-  GetPlatform().RunOnGuiThread([=]()
-  {
-    if (m_tapListener)
-      m_tapListener(tapInfo);
-  });
+  if (m_tapListener != nullptr)
+    m_tapListener(tapInfo);
 }
 
 void DrapeEngine::UserPositionChanged(m2::PointD const & position)
 {
-  GetPlatform().RunOnGuiThread([this, position]()
-  {
-    if (m_userPositionChangedFn)
-      m_userPositionChangedFn(position);
-  });
+  if (m_userPositionChanged != nullptr)
+    m_userPositionChanged(position);
 }
 
 void DrapeEngine::ResizeImpl(int w, int h)
 {
   gui::DrapeGui::Instance().SetSurfaceSize(m2::PointF(w, h));
   m_viewport.SetViewport(0, 0, w, h);
-  AddUserEvent(ResizeEvent(w, h));
+  AddUserEvent(make_unique_dp<ResizeEvent>(w, h));
 }
 
 void DrapeEngine::SetCompassInfo(location::CompassInfo const & info)
@@ -262,62 +351,59 @@ void DrapeEngine::SetCompassInfo(location::CompassInfo const & info)
                                   MessagePriority::High);
 }
 
-void DrapeEngine::SetGpsInfo(location::GpsInfo const & info, bool isNavigable, const location::RouteMatchingInfo & routeInfo)
+void DrapeEngine::SetGpsInfo(location::GpsInfo const & info, bool isNavigable,
+                             const location::RouteMatchingInfo & routeInfo)
 {
   m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
                                   make_unique_dp<GpsInfoMessage>(info, isNavigable, routeInfo),
                                   MessagePriority::High);
 }
 
-void DrapeEngine::MyPositionNextMode(int preferredZoomLevel)
+void DrapeEngine::SwitchMyPositionNextMode()
 {
+  using Mode = ChangeMyPositionModeMessage::EChangeType;
   m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
-                                  make_unique_dp<ChangeMyPositionModeMessage>(ChangeMyPositionModeMessage::TYPE_NEXT, preferredZoomLevel),
+                                  make_unique_dp<ChangeMyPositionModeMessage>(Mode::SwitchNextMode),
                                   MessagePriority::High);
 }
 
-void DrapeEngine::FollowRoute(int preferredZoomLevel, int preferredZoomLevel3d, double rotationAngle, double angleFOV)
+void DrapeEngine::LoseLocation()
 {
+  using Mode = ChangeMyPositionModeMessage::EChangeType;
   m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
-                                  make_unique_dp<FollowRouteMessage>(preferredZoomLevel, preferredZoomLevel3d,
-                                                                     rotationAngle, angleFOV),
-                                  MessagePriority::High);
-}
-
-void DrapeEngine::CancelMyPosition()
-{
-  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
-                                  make_unique_dp<ChangeMyPositionModeMessage>(ChangeMyPositionModeMessage::TYPE_CANCEL),
+                                  make_unique_dp<ChangeMyPositionModeMessage>(Mode::LoseLocation),
                                   MessagePriority::High);
 }
 
 void DrapeEngine::StopLocationFollow()
 {
+  using Mode = ChangeMyPositionModeMessage::EChangeType;
   m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
-                                  make_unique_dp<ChangeMyPositionModeMessage>(ChangeMyPositionModeMessage::TYPE_STOP_FOLLOW),
+                                  make_unique_dp<ChangeMyPositionModeMessage>(Mode::StopFollowing),
                                   MessagePriority::High);
 }
 
-void DrapeEngine::InvalidateMyPosition()
+void DrapeEngine::FollowRoute(int preferredZoomLevel, int preferredZoomLevel3d, bool enableAutoZoom)
 {
   m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
-                                  make_unique_dp<ChangeMyPositionModeMessage>(ChangeMyPositionModeMessage::TYPE_INVALIDATE),
+                                  make_unique_dp<FollowRouteMessage>(preferredZoomLevel,
+                                                                     preferredZoomLevel3d, enableAutoZoom),
                                   MessagePriority::High);
 }
 
-void DrapeEngine::SetMyPositionModeListener(location::TMyPositionModeChanged const & fn)
+void DrapeEngine::SetModelViewListener(TModelViewListenerFn && fn)
 {
-  m_myPositionModeChanged = fn;
+  m_modelViewChanged = std::move(fn);
 }
 
-void DrapeEngine::SetTapEventInfoListener(TTapEventInfoFn const & fn)
+void DrapeEngine::SetTapEventInfoListener(TTapEventInfoFn && fn)
 {
-  m_tapListener = fn;
+  m_tapListener = std::move(fn);
 }
 
-void DrapeEngine::SetUserPositionListener(DrapeEngine::TUserPositionChangedFn const & fn)
+void DrapeEngine::SetUserPositionListener(TUserPositionChangedFn && fn)
 {
-  m_userPositionChangedFn = fn;
+  m_userPositionChanged = std::move(fn);
 }
 
 FeatureID DrapeEngine::GetVisiblePOI(m2::PointD const & glbPoint)
@@ -332,10 +418,11 @@ FeatureID DrapeEngine::GetVisiblePOI(m2::PointD const & glbPoint)
   return result;
 }
 
-void DrapeEngine::SelectObject(SelectionShape::ESelectedObject obj, m2::PointD const & pt, bool isAnim)
+void DrapeEngine::SelectObject(SelectionShape::ESelectedObject obj, m2::PointD const & pt,
+                               FeatureID const & featureId, bool isAnim)
 {
   m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
-                                  make_unique_dp<SelectObjectMessage>(obj, pt, isAnim),
+                                  make_unique_dp<SelectObjectMessage>(obj, pt, featureId, isAnim),
                                   MessagePriority::High);
 }
 
@@ -370,18 +457,19 @@ bool DrapeEngine::GetMyPosition(m2::PointD & myPosition)
   return hasPosition;
 }
 
-void DrapeEngine::AddRoute(m2::PolylineD const & routePolyline, vector<double> const & turns,
-                           df::ColorConstant color)
+dp::DrapeID DrapeEngine::AddSubroute(drape_ptr<Subroute> && subroute)
 {
+  dp::DrapeID const id = GenerateDrapeID();
   m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
-                                  make_unique_dp<AddRouteMessage>(routePolyline, turns, color),
+                                  make_unique_dp<AddSubrouteMessage>(id, std::move(subroute)),
                                   MessagePriority::Normal);
+  return id;
 }
 
-void DrapeEngine::RemoveRoute(bool deactivateFollowing)
+void DrapeEngine::RemoveSubroute(dp::DrapeID subrouteId, bool deactivateFollowing)
 {
   m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
-                                  make_unique_dp<RemoveRouteMessage>(deactivateFollowing),
+                                  make_unique_dp<RemoveSubrouteMessage>(subrouteId, deactivateFollowing),
                                   MessagePriority::Normal);
 }
 
@@ -392,49 +480,82 @@ void DrapeEngine::DeactivateRouteFollowing()
                                   MessagePriority::Normal);
 }
 
-void DrapeEngine::SetRoutePoint(m2::PointD const & position, bool isStart, bool isValid)
+void DrapeEngine::SetSubrouteVisibility(dp::DrapeID subrouteId, bool isVisible)
 {
-  m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
-                                  make_unique_dp<CacheRouteSignMessage>(position, isStart, isValid),
+  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
+                                  make_unique_dp<SetSubrouteVisibilityMessage>(subrouteId, isVisible),
+                                  MessagePriority::Normal);
+}
+
+dp::DrapeID DrapeEngine::AddRoutePreviewSegment(m2::PointD const & startPt, m2::PointD const & finishPt)
+{
+  dp::DrapeID const id = GenerateDrapeID();
+  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
+                                  make_unique_dp<AddRoutePreviewSegmentMessage>(id, startPt, finishPt),
+                                  MessagePriority::Normal);
+  return id;
+}
+
+void DrapeEngine::RemoveRoutePreviewSegment(dp::DrapeID segmentId)
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
+                                  make_unique_dp<RemoveRoutePreviewSegmentMessage>(segmentId),
+                                  MessagePriority::Normal);
+}
+
+void DrapeEngine::RemoveAllRoutePreviewSegments()
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
+                                  make_unique_dp<RemoveRoutePreviewSegmentMessage>(),
                                   MessagePriority::Normal);
 }
 
 void DrapeEngine::SetWidgetLayout(gui::TWidgetsLayoutInfo && info)
 {
-  m_widgetsLayout = move(info);
+  m_widgetsLayout = std::move(info);
+  for (auto const & layout : m_widgetsLayout)
+  {
+    auto const itInfo = m_widgetsInfo.find(layout.first);
+    if (itInfo != m_widgetsInfo.end())
+      itInfo->second.m_pixelPivot = layout.second;
+  }
   m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
                                   make_unique_dp<GuiLayerLayoutMessage>(m_widgetsLayout),
                                   MessagePriority::Normal);
 }
 
-gui::TWidgetsSizeInfo const & DrapeEngine::GetWidgetSizes()
+void DrapeEngine::AllowAutoZoom(bool allowAutoZoom)
 {
-  return m_widgetSizes;
+  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
+                                  make_unique_dp<AllowAutoZoomMessage>(allowAutoZoom),
+                                  MessagePriority::Normal);
 }
 
-void DrapeEngine::Allow3dMode(bool allowPerspectiveInNavigation, bool allow3dBuildings, double rotationAngle, double angleFOV)
+void DrapeEngine::Allow3dMode(bool allowPerspectiveInNavigation, bool allow3dBuildings)
 {
   m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
                                   make_unique_dp<Allow3dBuildingsMessage>(allow3dBuildings),
                                   MessagePriority::Normal);
 
   m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
-                                  make_unique_dp<Allow3dModeMessage>(allowPerspectiveInNavigation, allow3dBuildings,
-                                                                     rotationAngle, angleFOV),
+                                  make_unique_dp<Allow3dModeMessage>(allowPerspectiveInNavigation,
+                                                                     allow3dBuildings),
                                   MessagePriority::Normal);
 }
 
-void DrapeEngine::EnablePerspective(double rotationAngle, double angleFOV)
+void DrapeEngine::EnablePerspective()
 {
   m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
-                                  make_unique_dp<EnablePerspectiveMessage>(rotationAngle, angleFOV),
+                                  make_unique_dp<EnablePerspectiveMessage>(),
                                   MessagePriority::Normal);
 }
 
-void DrapeEngine::UpdateGpsTrackPoints(vector<df::GpsTrackPoint> && toAdd, vector<uint32_t> && toRemove)
+void DrapeEngine::UpdateGpsTrackPoints(std::vector<df::GpsTrackPoint> && toAdd,
+                                       std::vector<uint32_t> && toRemove)
 {
   m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
-                                  make_unique_dp<UpdateGpsTrackPointsMessage>(move(toAdd), move(toRemove)),
+                                  make_unique_dp<UpdateGpsTrackPointsMessage>(std::move(toAdd),
+                                                                              std::move(toRemove)),
                                   MessagePriority::Normal);
 }
 
@@ -445,26 +566,27 @@ void DrapeEngine::ClearGpsTrackPoints()
                                   MessagePriority::Normal);
 }
 
-void DrapeEngine::EnableChoosePositionMode(bool enable)
+void DrapeEngine::EnableChoosePositionMode(bool enable, std::vector<m2::TriangleD> && boundAreaTriangles,
+                                           bool hasPosition, m2::PointD const & position)
 {
   m_choosePositionMode = enable;
+  bool kineticScroll = m_kineticScrollEnabled;
   if (enable)
   {
     StopLocationFollow();
     m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
                                     make_unique_dp<ShowChoosePositionMarkMessage>(),
                                     MessagePriority::High);
-    m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
-                                    make_unique_dp<SetKineticScrollEnabledMessage>(false /* enabled */),
-                                    MessagePriority::High);
+    kineticScroll = false;
   }
   else
   {
     RecacheGui(true);
-    m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
-                                    make_unique_dp<SetKineticScrollEnabledMessage>(m_kineticScrollEnabled),
-                                    MessagePriority::High);
   }
+  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
+                                  make_unique_dp<SetAddNewPlaceModeMessage>(enable, std::move(boundAreaTriangles),
+                                                                            kineticScroll, hasPosition, position),
+                                  MessagePriority::High);
 }
 
 void DrapeEngine::BlockTapEvents(bool block)
@@ -485,4 +607,124 @@ void DrapeEngine::SetKineticScrollEnabled(bool enabled)
                                   MessagePriority::High);
 }
 
-} // namespace df
+void DrapeEngine::SetTimeInBackground(double time)
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
+                                  make_unique_dp<SetTimeInBackgroundMessage>(time),
+                                  MessagePriority::High);
+}
+
+void DrapeEngine::SetDisplacementMode(int mode)
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                                  make_unique_dp<SetDisplacementModeMessage>(mode),
+                                  MessagePriority::Normal);
+}
+
+void DrapeEngine::RequestSymbolsSize(std::vector<string> const & symbols,
+                                     TRequestSymbolsSizeCallback const & callback)
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                                  make_unique_dp<RequestSymbolsSizeMessage>(symbols, callback),
+                                  MessagePriority::Normal);
+}
+
+void DrapeEngine::EnableTraffic(bool trafficEnabled)
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                                  make_unique_dp<EnableTrafficMessage>(trafficEnabled),
+                                  MessagePriority::Normal);
+}
+
+void DrapeEngine::UpdateTraffic(traffic::TrafficInfo const & info)
+{
+  if (info.GetColoring().empty())
+    return;
+
+#ifdef DEBUG
+  for (auto const & segmentPair : info.GetColoring())
+    ASSERT_NOT_EQUAL(segmentPair.second, traffic::SpeedGroup::Unknown, ());
+#endif
+
+  df::TrafficSegmentsColoring segmentsColoring;
+  segmentsColoring.emplace(info.GetMwmId(), info.GetColoring());
+
+  m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                                  make_unique_dp<UpdateTrafficMessage>(std::move(segmentsColoring)),
+                                  MessagePriority::Normal);
+}
+
+void DrapeEngine::ClearTrafficCache(MwmSet::MwmId const & mwmId)
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                                  make_unique_dp<ClearTrafficDataMessage>(mwmId),
+                                  MessagePriority::Normal);
+}
+
+void DrapeEngine::SetSimplifiedTrafficColors(bool simplified)
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                                  make_unique_dp<SetSimplifiedTrafficColorsMessage>(simplified),
+                                  MessagePriority::Normal);
+}
+
+void DrapeEngine::SetFontScaleFactor(double scaleFactor)
+{
+  double const kMinScaleFactor = 0.5;
+  double const kMaxScaleFactor = 2.0;
+
+  scaleFactor = my::clamp(scaleFactor, kMinScaleFactor, kMaxScaleFactor);
+
+  VisualParams::Instance().SetFontScale(scaleFactor);
+}
+
+void DrapeEngine::RunScenario(ScenarioManager::ScenarioData && scenarioData,
+                              ScenarioManager::ScenarioCallback const & onStartFn,
+                              ScenarioManager::ScenarioCallback const & onFinishFn)
+{
+  auto const & manager = m_frontend->GetScenarioManager();
+  if (manager != nullptr)
+    manager->RunScenario(std::move(scenarioData), onStartFn, onFinishFn);
+}
+
+void DrapeEngine::AddCustomSymbols(CustomSymbols && symbols)
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                                  make_unique_dp<AddCustomSymbolsMessage>(std::move(symbols)),
+                                  MessagePriority::Normal);
+}
+
+void DrapeEngine::RemoveCustomSymbols(MwmSet::MwmId const & mwmId)
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                                  make_unique_dp<RemoveCustomSymbolsMessage>(mwmId),
+                                  MessagePriority::Normal);
+}
+
+void DrapeEngine::RemoveAllCustomSymbols()
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::ResourceUploadThread,
+                                  make_unique_dp<RemoveCustomSymbolsMessage>(),
+                                  MessagePriority::Normal);
+}
+
+void DrapeEngine::SetPosteffectEnabled(PostprocessRenderer::Effect effect, bool enabled)
+{
+  if (effect == df::PostprocessRenderer::Antialiasing)
+  {
+    LOG(LINFO, ("Antialiasing is", (enabled ? "enabled" : "disabled")));
+    settings::Set(dp::kSupportedAntialiasing, enabled);
+  }
+
+  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
+                                  make_unique_dp<SetPosteffectEnabledMessage>(effect, enabled),
+                                  MessagePriority::Normal);
+}
+
+void DrapeEngine::RunFirstLaunchAnimation()
+{
+  m_threadCommutator->PostMessage(ThreadsCommutator::RenderThread,
+                                  make_unique_dp<RunFirstLaunchAnimationMessage>(),
+                                  MessagePriority::Normal);
+}
+}  // namespace df

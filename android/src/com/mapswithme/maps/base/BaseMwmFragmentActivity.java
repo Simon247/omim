@@ -3,22 +3,32 @@ package com.mapswithme.maps.base;
 import android.app.Activity;
 import android.media.AudioManager;
 import android.os.Bundle;
+import android.support.annotation.CallSuper;
+import android.support.annotation.ColorRes;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.annotation.StyleRes;
 import android.support.v4.app.Fragment;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.view.MenuItem;
 
+import com.mapswithme.maps.MwmActivity;
 import com.mapswithme.maps.MwmApplication;
 import com.mapswithme.maps.R;
+import com.mapswithme.maps.SplashActivity;
+import com.mapswithme.util.Config;
+import com.mapswithme.util.PermissionsUtils;
 import com.mapswithme.util.ThemeUtils;
+import com.mapswithme.util.UiUtils;
 import com.mapswithme.util.Utils;
 
 public class BaseMwmFragmentActivity extends AppCompatActivity
                                   implements BaseActivity
 {
   private final BaseActivityDelegate mBaseDelegate = new BaseActivityDelegate(this);
+
+  private boolean mInitializationComplete = false;
 
   @Override
   public Activity get()
@@ -27,7 +37,8 @@ public class BaseMwmFragmentActivity extends AppCompatActivity
   }
 
   @Override
-  public int getThemeResourceId(String theme)
+  @StyleRes
+  public int getThemeResourceId(@NonNull String theme)
   {
     if (ThemeUtils.isDefaultTheme(theme))
         return R.style.MwmTheme;
@@ -38,16 +49,37 @@ public class BaseMwmFragmentActivity extends AppCompatActivity
     throw new IllegalArgumentException("Attempt to apply unsupported theme: " + theme);
   }
 
+  @CallSuper
   @Override
-  protected void onCreate(Bundle savedInstanceState)
+  protected void onCreate(@Nullable Bundle savedInstanceState)
   {
-    mBaseDelegate.onCreate();
+    if (!MwmApplication.get().isPlatformInitialized()
+        || !PermissionsUtils.isExternalStorageGranted())
+    {
+      super.onCreate(savedInstanceState);
+      goToSplashScreen();
+      return;
+    }
+    mInitializationComplete = true;
 
+    mBaseDelegate.onCreate();
     super.onCreate(savedInstanceState);
+
+    safeOnCreate(savedInstanceState);
+  }
+
+  @CallSuper
+  protected void safeOnCreate(@Nullable Bundle savedInstanceState)
+  {
     setVolumeControlStream(AudioManager.STREAM_MUSIC);
     final int layoutId = getContentLayoutResId();
     if (layoutId != 0)
       setContentView(layoutId);
+
+    if (useTransparentStatusBar())
+      UiUtils.setupStatusBar(this);
+    if (useColorStatusBar())
+      UiUtils.setupColorStatusBar(this, getStatusBarColor());
 
     // Use full-screen on Kindle Fire only
     if (Utils.isAmazonDevice())
@@ -56,10 +88,35 @@ public class BaseMwmFragmentActivity extends AppCompatActivity
       getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
     }
 
-    MwmApplication.get().initNativeCore();
-    MwmApplication.get().initCounters();
-
     attachDefaultFragment();
+  }
+
+  protected boolean isInitializationComplete()
+  {
+    return mInitializationComplete;
+  }
+
+  @ColorRes
+  protected int getStatusBarColor()
+  {
+    String theme = Config.getCurrentUiTheme();
+    if (ThemeUtils.isDefaultTheme(theme))
+      return R.color.bg_statusbar;
+
+    if (ThemeUtils.isNightTheme(theme))
+      return R.color.bg_statusbar_night;
+
+    throw new IllegalArgumentException("Attempt to apply unsupported theme: " + theme);
+  }
+
+  protected boolean useColorStatusBar()
+  {
+    return false;
+  }
+
+  protected boolean useTransparentStatusBar()
+  {
+    return true;
   }
 
   @Override
@@ -101,15 +158,23 @@ public class BaseMwmFragmentActivity extends AppCompatActivity
     return super.onOptionsItemSelected(item);
   }
 
+  @CallSuper
   @Override
   protected void onResume()
   {
     super.onResume();
+    if (!PermissionsUtils.isExternalStorageGranted())
+    {
+      goToSplashScreen();
+      return;
+    }
+
     mBaseDelegate.onResume();
   }
 
   @Override
-  protected void onPostResume() {
+  protected void onPostResume()
+  {
     super.onPostResume();
     mBaseDelegate.onPostResume();
   }
@@ -184,5 +249,14 @@ public class BaseMwmFragmentActivity extends AppCompatActivity
   protected int getFragmentContentResId()
   {
     return android.R.id.content;
+  }
+
+  private void goToSplashScreen()
+  {
+    Class<? extends Activity> type = null;
+    if (!(this instanceof MwmActivity))
+      type = getClass();
+    SplashActivity.start(this, type);
+    finish();
   }
 }

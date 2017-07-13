@@ -4,6 +4,7 @@
 #include "base/string_utils.hpp"
 
 #include "std/algorithm.hpp"
+#include "std/iterator.hpp"
 #include "std/string.hpp"
 #include "std/utility.hpp"
 
@@ -88,12 +89,12 @@ string GetDistanceTextId(Notification const & notification)
 
   switch (notification.m_lengthUnits)
   {
-    case ::settings::Metric:
-      return DistToTextId(GetAllSoundedDistMeters().cbegin(), GetAllSoundedDistMeters().cend(),
-                          notification.m_distanceUnits);
-    case ::settings::Foot:
-      return DistToTextId(GetAllSoundedDistFeet().cbegin(), GetAllSoundedDistFeet().cend(),
-                          notification.m_distanceUnits);
+  case measurement_utils::Units::Metric:
+    return DistToTextId(GetAllSoundedDistMeters().cbegin(), GetAllSoundedDistMeters().cend(),
+                        notification.m_distanceUnits);
+  case measurement_utils::Units::Imperial:
+    return DistToTextId(GetAllSoundedDistFeet().cbegin(), GetAllSoundedDistFeet().cend(),
+                        notification.m_distanceUnits);
   }
   ASSERT(false, ());
   return string();

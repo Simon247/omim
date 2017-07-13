@@ -5,6 +5,7 @@
 #include "std/algorithm.hpp"
 #include "std/functional.hpp"
 #include "std/iostream.hpp"
+#include "std/limits.hpp"
 #include "std/map.hpp"
 #include "std/queue.hpp"
 #include "std/vector.hpp"
@@ -61,30 +62,99 @@ public:
 
   using TOnVisitedVertexCallback = std::function<void(TVertexType const &, TVertexType const &)>;
 
-  Result FindPath(TGraphType const & graph,
-                  TVertexType const & startVertex, TVertexType const & finalVertex,
-                  RoutingResult<TVertexType> & result,
+  class Context final
+  {
+  public:
+    void Clear()
+    {
+      m_distanceMap.clear();
+      m_parents.clear();
+    }
+
+    bool HasDistance(TVertexType const & vertex) const
+    {
+      return m_distanceMap.find(vertex) != m_distanceMap.cend();
+    }
+
+    double GetDistance(TVertexType const & vertex) const
+    {
+      auto const & it = m_distanceMap.find(vertex);
+      if (it == m_distanceMap.cend())
+        return kInfiniteDistance;
+
+      return it->second;
+    }
+
+    void SetDistance(TVertexType const & vertex, double distance)
+    {
+      m_distanceMap[vertex] = distance;
+    }
+
+    void SetParent(TVertexType const & parent, TVertexType const & child)
+    {
+      m_parents[parent] = child;
+    }
+
+    void ReconstructPath(TVertexType const & v, vector<TVertexType> & path) const;
+
+  private:
+    map<TVertexType, double> m_distanceMap;
+    map<TVertexType, TVertexType> m_parents;
+  };
+
+  // VisitVertex returns true: wave will continue
+  // VisitVertex returns false: wave will stop
+  template <typename VisitVertex, typename AdjustEdgeWeight>
+  void PropagateWave(TGraphType & graph, TVertexType const & startVertex,
+                     VisitVertex && visitVertex, AdjustEdgeWeight && adjustEdgeWeight,
+                     Context & context) const;
+
+  template <typename VisitVertex>
+  void PropagateWave(TGraphType & graph, TVertexType const & startVertex,
+                     VisitVertex && visitVertex, Context & context) const;
+
+  Result FindPath(TGraphType & graph, TVertexType const & startVertex,
+                  TVertexType const & finalVertex, RoutingResult<TVertexType> & result,
                   my::Cancellable const & cancellable = my::Cancellable(),
                   TOnVisitedVertexCallback onVisitedVertexCallback = nullptr) const;
 
-  Result FindPathBidirectional(TGraphType const & graph,
+  Result FindPathBidirectional(TGraphType & graph,
                                TVertexType const & startVertex, TVertexType const & finalVertex,
                                RoutingResult<TVertexType> & result,
                                my::Cancellable const & cancellable = my::Cancellable(),
                                TOnVisitedVertexCallback onVisitedVertexCallback = nullptr) const;
 
+  // Adjust route to the previous one.
+  // adjustLimit - distance limit for wave propagation, measured in same units as graph edges length.
+  typename AStarAlgorithm<TGraph>::Result AdjustRoute(
+      TGraphType & graph, TVertexType const & startVertex, vector<TEdgeType> const & prevRoute,
+      double adjustLimit, RoutingResult<TVertexType> & result, my::Cancellable const & cancellable,
+      TOnVisitedVertexCallback onVisitedVertexCallback) const;
+
 private:
-  // Periodicy of checking is cancellable cancelled.
-  static uint32_t constexpr kCancelledPollPeriod = 128;
-
-  // Periodicy of switching a wave of bidirectional algorithm.
+  // Periodicity of switching a wave of bidirectional algorithm.
   static uint32_t constexpr kQueueSwitchPeriod = 128;
-
-  // Periodicy of calling callback about visited vertice.
-  static uint32_t constexpr kVisitedVerticesPeriod = 4;
 
   // Precision of comparison weights.
   static double constexpr kEpsilon = 1e-6;
+  static double constexpr kInfiniteDistance = numeric_limits<double>::max();
+
+  class PeriodicPollCancellable final
+  {
+  public:
+    PeriodicPollCancellable(my::Cancellable const & cancellable) : m_cancellable(cancellable) {}
+
+    bool IsCancelled()
+    {
+      // Periodicity of checking is cancellable cancelled.
+      uint32_t constexpr kPeriod = 128;
+      return count++ % kPeriod == 0 && m_cancellable.IsCancelled();
+    }
+
+  private:
+    my::Cancellable const & m_cancellable;
+    uint32_t count = 0;
+  };
 
   // State is what is going to be put in the priority queue. See the
   // comment for FindPath for more information.
@@ -104,8 +174,10 @@ private:
   struct BidirectionalStepContext
   {
     BidirectionalStepContext(bool forward, TVertexType const & startVertex,
-                             TVertexType const & finalVertex, TGraphType const & graph)
+                             TVertexType const & finalVertex, TGraphType & graph)
         : forward(forward), startVertex(startVertex), finalVertex(finalVertex), graph(graph)
+        , m_piRT(graph.HeuristicCostEstimate(finalVertex, startVertex))
+        , m_piFS(graph.HeuristicCostEstimate(startVertex, finalVertex))
     {
       bestVertex = forward ? startVertex : finalVertex;
       pS = ConsistentHeuristic(bestVertex);
@@ -124,19 +196,17 @@ private:
     {
       double const piF = graph.HeuristicCostEstimate(v, finalVertex);
       double const piR = graph.HeuristicCostEstimate(v, startVertex);
-      double const piRT = graph.HeuristicCostEstimate(finalVertex, startVertex);
-      double const piFS = graph.HeuristicCostEstimate(startVertex, finalVertex);
       if (forward)
       {
         /// @todo careful: with this "return" here and below in the Backward case
         /// the heuristic becomes inconsistent but still seems to work.
         /// return HeuristicCostEstimate(v, finalVertex);
-        return 0.5 * (piF - piR + piRT);
+        return 0.5 * (piF - piR + m_piRT);
       }
       else
       {
         // return HeuristicCostEstimate(v, startVertex);
-        return 0.5 * (piR - piF + piFS);
+        return 0.5 * (piR - piF + m_piFS);
       }
     }
 
@@ -151,7 +221,9 @@ private:
     bool const forward;
     TVertexType const & startVertex;
     TVertexType const & finalVertex;
-    TGraph const & graph;
+    TGraph & graph;
+    double const m_piRT;
+    double const m_piFS;
 
     priority_queue<State, vector<State>, greater<State>> queue;
     map<TVertexType, double> bestDistance;
@@ -169,6 +241,66 @@ private:
                                            vector<TVertexType> & path);
 };
 
+template <typename TGraph>
+template <typename VisitVertex, typename AdjustEdgeWeight>
+void AStarAlgorithm<TGraph>::PropagateWave(TGraphType & graph, TVertexType const & startVertex,
+                                           VisitVertex && visitVertex,
+                                           AdjustEdgeWeight && adjustEdgeWeight,
+                                           AStarAlgorithm<TGraph>::Context & context) const
+{
+  context.Clear();
+
+  priority_queue<State, vector<State>, greater<State>> queue;
+
+  context.SetDistance(startVertex, 0.0);
+  queue.push(State(startVertex, 0.0));
+
+  vector<TEdgeType> adj;
+
+  while (!queue.empty())
+  {
+    State const stateV = queue.top();
+    queue.pop();
+
+    if (stateV.distance > context.GetDistance(stateV.vertex))
+      continue;
+
+    if (!visitVertex(stateV.vertex))
+      return;
+
+    graph.GetOutgoingEdgesList(stateV.vertex, adj);
+    for (auto const & edge : adj)
+    {
+      State stateW(edge.GetTarget(), 0.0);
+      if (stateV.vertex == stateW.vertex)
+        continue;
+
+      double const edgeWeight = adjustEdgeWeight(stateV.vertex, edge);
+      double const newReducedDist = stateV.distance + edgeWeight;
+
+      if (newReducedDist >= context.GetDistance(stateW.vertex) - kEpsilon)
+        continue;
+
+      stateW.distance = newReducedDist;
+      context.SetDistance(stateW.vertex, newReducedDist);
+      context.SetParent(stateW.vertex, stateV.vertex);
+      queue.push(stateW);
+    }
+  }
+}
+
+template <typename TGraph>
+template <typename VisitVertex>
+void AStarAlgorithm<TGraph>::PropagateWave(TGraphType & graph, TVertexType const & startVertex,
+                                           VisitVertex && visitVertex,
+                                           AStarAlgorithm<TGraph>::Context & context) const
+{
+  auto const adjustEdgeWeight = [](TVertexType const & /* vertex */, TEdgeType const & edge) {
+    return edge.GetWeight();
+  };
+  PropagateWave(graph, startVertex, visitVertex, adjustEdgeWeight, context);
+}
+
 // This implementation is based on the view that the A* algorithm
 // is equivalent to Dijkstra's algorithm that is run on a reweighted
 // version of the graph. If an edge (v, w) has length l(v, w), its reduced
@@ -182,82 +314,61 @@ private:
 
 template <typename TGraph>
 typename AStarAlgorithm<TGraph>::Result AStarAlgorithm<TGraph>::FindPath(
-    TGraphType const & graph,
-    TVertexType const & startVertex, TVertexType const & finalVertex,
-    RoutingResult<TVertexType> & result,
-    my::Cancellable const & cancellable,
+    TGraphType & graph, TVertexType const & startVertex, TVertexType const & finalVertex,
+    RoutingResult<TVertexType> & result, my::Cancellable const & cancellable,
     TOnVisitedVertexCallback onVisitedVertexCallback) const
 {
   result.Clear();
   if (nullptr == onVisitedVertexCallback)
-    onVisitedVertexCallback = [](TVertexType const &, TVertexType const &){};
+    onVisitedVertexCallback = [](TVertexType const &, TVertexType const &) {};
 
-  map<TVertexType, double> bestDistance;
-  priority_queue<State, vector<State>, greater<State>> queue;
-  map<TVertexType, TVertexType> parent;
+  Context context;
+  PeriodicPollCancellable periodicCancellable(cancellable);
+  Result resultCode = Result::NoPath;
 
-  bestDistance[startVertex] = 0.0;
-  queue.push(State(startVertex, 0.0));
+  auto visitVertex = [&](TVertexType const & vertex) {
+    if (periodicCancellable.IsCancelled())
+    {
+      resultCode = Result::Cancelled;
+      return false;
+    }
 
-  vector<TEdgeType> adj;
+    onVisitedVertexCallback(vertex, finalVertex);
 
-  uint32_t steps = 0;
-  while (!queue.empty())
+    if (vertex == finalVertex)
+    {
+      resultCode = Result::OK;
+      return false;
+    }
+
+    return true;
+  };
+
+  auto adjustEdgeWeight = [&](TVertexType const & vertex, TEdgeType const & edge) {
+    double const len = edge.GetWeight();
+    double const piV = graph.HeuristicCostEstimate(vertex, finalVertex);
+    double const piW = graph.HeuristicCostEstimate(edge.GetTarget(), finalVertex);
+    double const reducedLen = len + piW - piV;
+
+    CHECK(reducedLen >= -kEpsilon, ("Invariant violated:", reducedLen, "<", -kEpsilon));
+    return max(reducedLen, 0.0);
+  };
+
+  PropagateWave(graph, startVertex, visitVertex, adjustEdgeWeight, context);
+
+  if (resultCode == Result::OK)
   {
-    ++steps;
-
-    if (steps % kCancelledPollPeriod == 0 && cancellable.IsCancelled())
-      return Result::Cancelled;
-
-    State const stateV = queue.top();
-    queue.pop();
-
-    if (stateV.distance > bestDistance[stateV.vertex])
-      continue;
-
-    if (steps % kVisitedVerticesPeriod == 0)
-      onVisitedVertexCallback(stateV.vertex, finalVertex);
-
-    if (stateV.vertex == finalVertex)
-    {
-      ReconstructPath(stateV.vertex, parent, result.path);
-      result.distance = stateV.distance - graph.HeuristicCostEstimate(stateV.vertex, finalVertex) + graph.HeuristicCostEstimate(startVertex, finalVertex);
-      ASSERT_EQUAL(graph.HeuristicCostEstimate(stateV.vertex, finalVertex), 0, ());
-      return Result::OK;
-    }
-
-    graph.GetOutgoingEdgesList(stateV.vertex, adj);
-    for (auto const & edge : adj)
-    {
-      State stateW(edge.GetTarget(), 0.0);
-      if (stateV.vertex == stateW.vertex)
-        continue;
-
-      double const len = edge.GetWeight();
-      double const piV = graph.HeuristicCostEstimate(stateV.vertex, finalVertex);
-      double const piW = graph.HeuristicCostEstimate(stateW.vertex, finalVertex);
-      double const reducedLen = len + piW - piV;
-
-      CHECK(reducedLen >= -kEpsilon, ("Invariant violated:", reducedLen, "<", -kEpsilon));
-      double const newReducedDist = stateV.distance + max(reducedLen, 0.0);
-
-      auto const t = bestDistance.find(stateW.vertex);
-      if (t != bestDistance.end() && newReducedDist >= t->second - kEpsilon)
-        continue;
-
-      stateW.distance = newReducedDist;
-      bestDistance[stateW.vertex] = newReducedDist;
-      parent[stateW.vertex] = stateV.vertex;
-      queue.push(stateW);
-    }
+    context.ReconstructPath(finalVertex, result.path);
+    result.distance =
+        context.GetDistance(finalVertex) - graph.HeuristicCostEstimate(startVertex, finalVertex);
   }
 
-  return Result::NoPath;
+  return resultCode;
 }
 
 template <typename TGraph>
 typename AStarAlgorithm<TGraph>::Result AStarAlgorithm<TGraph>::FindPathBidirectional(
-    TGraphType const & graph,
+    TGraphType & graph,
     TVertexType const & startVertex, TVertexType const & finalVertex,
     RoutingResult<TVertexType> & result,
     my::Cancellable const & cancellable,
@@ -292,11 +403,13 @@ typename AStarAlgorithm<TGraph>::Result AStarAlgorithm<TGraph>::FindPathBidirect
   // because if we have not found a path by the time one of the
   // queues is exhausted, we never will.
   uint32_t steps = 0;
+  PeriodicPollCancellable periodicCancellable(cancellable);
+
   while (!cur->queue.empty() && !nxt->queue.empty())
   {
     ++steps;
 
-    if (steps % kCancelledPollPeriod == 0 && cancellable.IsCancelled())
+    if (periodicCancellable.IsCancelled())
       return Result::Cancelled;
 
     if (steps % kQueueSwitchPeriod == 0)
@@ -336,8 +449,7 @@ typename AStarAlgorithm<TGraph>::Result AStarAlgorithm<TGraph>::FindPathBidirect
     if (stateV.distance > cur->bestDistance[stateV.vertex])
       continue;
 
-    if (steps % kVisitedVerticesPeriod == 0)
-      onVisitedVertexCallback(stateV.vertex, cur->forward ? cur->finalVertex : cur->startVertex);
+    onVisitedVertexCallback(stateV.vertex, cur->forward ? cur->finalVertex : cur->startVertex);
 
     cur->GetAdjacencyList(stateV.vertex, adj);
     for (auto const & edge : adj)
@@ -390,6 +502,94 @@ typename AStarAlgorithm<TGraph>::Result AStarAlgorithm<TGraph>::FindPathBidirect
   return Result::NoPath;
 }
 
+template <typename TGraph>
+typename AStarAlgorithm<TGraph>::Result AStarAlgorithm<TGraph>::AdjustRoute(
+    TGraphType & graph, TVertexType const & startVertex, vector<TEdgeType> const & prevRoute,
+    double adjustLimit, RoutingResult<TVertexType> & result, my::Cancellable const & cancellable,
+    TOnVisitedVertexCallback onVisitedVertexCallback) const
+{
+  CHECK(!prevRoute.empty(), ());
+
+  result.Clear();
+  if (onVisitedVertexCallback == nullptr)
+    onVisitedVertexCallback = [](TVertexType const &, TVertexType const &) {};
+
+  bool wasCancelled = false;
+  double minDistance = kInfiniteDistance;
+  TVertexType returnVertex;
+
+  map<TVertexType, double> remainingDistances;
+  double remainingDistance = 0.0;
+
+  for (auto it = prevRoute.crbegin(); it != prevRoute.crend(); ++it)
+  {
+    remainingDistances[it->GetTarget()] = remainingDistance;
+    remainingDistance += it->GetWeight();
+  }
+
+  Context context;
+  PeriodicPollCancellable periodicCancellable(cancellable);
+
+  auto visitVertex = [&](TVertexType const & vertex) {
+
+    if (periodicCancellable.IsCancelled())
+    {
+      wasCancelled = true;
+      return false;
+    }
+
+    auto const distance = context.GetDistance(vertex);
+    if (distance > adjustLimit)
+      return false;
+
+    onVisitedVertexCallback(startVertex, vertex);
+
+    auto it = remainingDistances.find(vertex);
+    if (it != remainingDistances.cend())
+    {
+      double const fullDistance = distance + it->second;
+      if (fullDistance < minDistance)
+      {
+        minDistance = fullDistance;
+        returnVertex = vertex;
+      }
+    }
+
+    return true;
+  };
+
+  PropagateWave(graph, startVertex, visitVertex, context);
+  if (wasCancelled)
+    return Result::Cancelled;
+
+  if (minDistance == kInfiniteDistance)
+    return Result::NoPath;
+
+  context.ReconstructPath(returnVertex, result.path);
+
+  // Append remaining route.
+  bool found = false;
+  for (size_t i = 0; i < prevRoute.size(); ++i)
+  {
+    if (prevRoute[i].GetTarget() == returnVertex)
+    {
+      for (size_t j = i + 1; j < prevRoute.size(); ++j)
+        result.path.push_back(prevRoute[j].GetTarget());
+
+      found = true;
+      break;
+    }
+  }
+
+  CHECK(found,
+        ("Can't find", returnVertex, ", prev:", prevRoute.size(), ", adjust:", result.path.size()));
+
+  auto const & it = remainingDistances.find(returnVertex);
+  CHECK(it != remainingDistances.end(), ());
+  result.distance = context.GetDistance(returnVertex) + it->second;
+  return Result::OK;
+}
+
 // static
 template <typename TGraph>
 void AStarAlgorithm<TGraph>::ReconstructPath(TVertexType const & v,
@@ -425,4 +625,10 @@ void AStarAlgorithm<TGraph>::ReconstructPathBidirectional(
   path.insert(path.end(), pathW.rbegin(), pathW.rend());
 }
 
+template <typename TGraph>
+void AStarAlgorithm<TGraph>::Context::ReconstructPath(TVertexType const & v,
+                                                      vector<TVertexType> & path) const
+{
+  AStarAlgorithm<TGraph>::ReconstructPath(v, m_parents, path);
+}
 }  // namespace routing

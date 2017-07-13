@@ -3,12 +3,14 @@
 namespace df
 {
 
-void RequestedTiles::Set(ScreenBase const & screen, bool have3dBuildings, TTilesCollection && tiles)
+void RequestedTiles::Set(ScreenBase const & screen, bool have3dBuildings, bool forceRequest,
+                         TTilesCollection && tiles)
 {
   lock_guard<mutex> lock(m_mutex);
   m_tiles = move(tiles);
   m_screen = screen;
   m_have3dBuildings = have3dBuildings;
+  m_forceRequest = forceRequest;
 }
 
 TTilesCollection RequestedTiles::GetTiles()
@@ -21,16 +23,12 @@ TTilesCollection RequestedTiles::GetTiles()
   return tiles;
 }
 
-ScreenBase RequestedTiles::GetScreen()
+void RequestedTiles::GetParams(ScreenBase & screen, bool & have3dBuildings, bool & forceRequest)
 {
   lock_guard<mutex> lock(m_mutex);
-  return m_screen;
-}
-
-bool RequestedTiles::Have3dBuildings()
-{
-  lock_guard<mutex> lock(m_mutex);
-  return m_have3dBuildings;
+  screen = m_screen;
+  have3dBuildings = m_have3dBuildings;
+  forceRequest = m_forceRequest;
 }
 
 bool RequestedTiles::CheckTileKey(TileKey const & tileKey) const
@@ -42,4 +40,4 @@ bool RequestedTiles::CheckTileKey(TileKey const & tileKey) const
   return m_tiles.find(tileKey) != m_tiles.end();
 }
 
-} //namespace df
+}  // namespace df

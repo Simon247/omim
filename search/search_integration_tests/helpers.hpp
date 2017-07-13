@@ -1,13 +1,18 @@
 #pragma once
 
-#include "search/search_tests_support/test_mwm_builder.hpp"
 #include "search/search_tests_support/test_results_matching.hpp"
 #include "search/search_tests_support/test_search_engine.hpp"
+#include "search/search_tests_support/test_search_request.hpp"
+
+#include "generator/generator_tests_support/test_mwm_builder.hpp"
 
 #include "storage/country_decl.hpp"
 #include "storage/country_info_getter.hpp"
 
-#include "indexer/classificator_loader.hpp"
+#include "indexer/feature.hpp"
+#include "indexer/feature_decl.hpp"
+#include "indexer/index.hpp"
+#include "indexer/indexer_tests_support/helpers.hpp"
 #include "indexer/mwm_set.hpp"
 
 #include "geometry/rect2d.hpp"
@@ -16,7 +21,7 @@
 #include "platform/local_country_file.hpp"
 #include "platform/local_country_file_utils.hpp"
 
-#include "base/logging.hpp"
+#include "base/assert.hpp"
 
 #include "std/unique_ptr.hpp"
 #include "std/vector.hpp"
@@ -28,13 +33,16 @@ namespace search
 class TestWithClassificator
 {
 public:
-  TestWithClassificator() { classificator::Load(); }
+  TestWithClassificator();
 };
 
 class SearchTest : public TestWithClassificator
 {
 public:
+  using TRules = vector<shared_ptr<tests_support::MatchingRule>>;
+
   SearchTest();
+
   ~SearchTest();
 
   // Registers country in internal records. Note that physical country
@@ -56,7 +64,7 @@ public:
     Cleanup(file);
 
     {
-      tests_support::TestMwmBuilder builder(file, type);
+      generator::tests_support::TestMwmBuilder builder(file, type);
       fn(builder);
     }
 
@@ -72,13 +80,40 @@ public:
     return id;
   }
 
+  template <typename TBuildFn>
+  MwmSet::MwmId BuildWorld(TBuildFn && fn)
+  {
+    return BuildMwm("testWorld", feature::DataHeader::world, forward<TBuildFn>(fn));
+  }
+
+  template <typename TBuildFn>
+  MwmSet::MwmId BuildCountry(string const & name, TBuildFn && fn)
+  {
+    return BuildMwm(name, feature::DataHeader::country, forward<TBuildFn>(fn));
+  }
+
+  template <typename TEditorFn>
+  void EditFeature(FeatureID const & id, TEditorFn && fn)
+  {
+    Index::FeaturesLoaderGuard loader(m_engine, id.m_mwmId);
+    FeatureType ft;
+    CHECK(loader.GetFeatureByIndex(id.m_index, ft), ());
+    indexer::tests_support::EditFeature(ft, forward<TEditorFn>(fn));
+  }
+
   inline void SetViewport(m2::RectD const & viewport) { m_viewport = viewport; }
 
-  bool ResultsMatch(string const & query,
-                    vector<shared_ptr<tests_support::MatchingRule>> const & rules);
+  bool ResultsMatch(string const & query, TRules const & rules);
 
-  bool ResultsMatch(string const & query, Mode mode,
-                    vector<shared_ptr<tests_support::MatchingRule>> const & rules);
+  bool ResultsMatch(string const & query, string const & locale, TRules const & rules);
+
+  bool ResultsMatch(string const & query, Mode mode, TRules const & rules);
+
+  bool ResultsMatch(vector<search::Result> const & results, TRules const & rules);
+
+  bool ResultsMatch(SearchParams const & params, TRules const & rules);
+
+  unique_ptr<tests_support::TestSearchRequest> MakeRequest(string const & query);
 
   size_t CountFeatures(m2::RectD const & rect);
 

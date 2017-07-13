@@ -9,12 +9,13 @@ import android.text.TextUtils;
  */
 public final class CountryItem implements Comparable<CountryItem>
 {
-  private static String ROOT;
+  private static String sRootId;
 
   // Must correspond to ItemCategory in MapManager.cpp
   static final int CATEGORY_NEAR_ME = 0;
   static final int CATEGORY_DOWNLOADED = 1;
   static final int CATEGORY_AVAILABLE = 2;
+  static final int CATEGORY__LAST = CATEGORY_AVAILABLE;
 
   // Must correspond to NodeStatus in storage_defines.hpp
   public static final int STATUS_UNKNOWN = 0;
@@ -39,8 +40,10 @@ public final class CountryItem implements Comparable<CountryItem>
   public String name;
   public String directParentName;
   public String topmostParentName;
+  public String description;
 
   public long size;
+  public long enqueuedSize;
   public long totalSize;
 
   public int childCount;
@@ -58,6 +61,12 @@ public final class CountryItem implements Comparable<CountryItem>
   int headerId;
   // Internal field to store search result name
   String searchResultName;
+
+  private static void ensureRootIdKnown()
+  {
+    if (sRootId == null)
+      sRootId = MapManager.nativeGetRoot();
+  }
 
   public CountryItem(String id)
   {
@@ -97,11 +106,9 @@ public final class CountryItem implements Comparable<CountryItem>
   {
     MapManager.nativeGetAttributes(this);
 
-    if (ROOT == null)
-      ROOT = MapManager.nativeGetRoot();
-
-    if (TextUtils.equals(ROOT, directParentName))
-      directParentName = "";
+    ensureRootIdKnown();
+    if (TextUtils.equals(sRootId, directParentId))
+      directParentId = "";
   }
 
   public static CountryItem fill(String countryId)
@@ -109,6 +116,18 @@ public final class CountryItem implements Comparable<CountryItem>
     CountryItem res = new CountryItem(countryId);
     res.update();
     return res;
+  }
+
+  public static boolean isRoot(String id)
+  {
+    ensureRootIdKnown();
+    return sRootId.equals(id);
+  }
+
+  public static String getRootId()
+  {
+    ensureRootIdKnown();
+    return sRootId;
   }
 
   public boolean isExpandable()
@@ -131,6 +150,7 @@ public final class CountryItem implements Comparable<CountryItem>
            ", errorCode: " + errorCode +
            ", headerId: " + headerId +
            ", size: " + size +
+           ", enqueuedSize: " + enqueuedSize +
            ", totalSize: " + totalSize +
            ", childCount: " + childCount +
            ", totalChildCount: " + totalChildCount +

@@ -1,5 +1,10 @@
-#include "route.hpp"
-#include "turns_generator.hpp"
+#include "routing/route.hpp"
+
+#include "routing/turns_generator.hpp"
+
+#include "traffic/speed_groups.hpp"
+
+#include "indexer/feature_altitude.hpp"
 
 #include "geometry/mercator.hpp"
 
@@ -12,6 +17,12 @@
 #include "base/logging.hpp"
 
 #include "std/numeric.hpp"
+
+#include <algorithm>
+#include <utility>
+
+using namespace traffic;
+using namespace routing::turns;
 
 namespace routing
 {
@@ -41,6 +52,8 @@ void Route::Swap(Route & rhs)
   swap(m_times, rhs.m_times);
   swap(m_streets, rhs.m_streets);
   m_absentCountries.swap(rhs.m_absentCountries);
+  m_altitudes.swap(rhs.m_altitudes);
+  m_traffic.swap(rhs.m_traffic);
 }
 
 void Route::AddAbsentCountry(string const & name)
@@ -50,40 +63,22 @@ void Route::AddAbsentCountry(string const & name)
 
 double Route::GetTotalDistanceMeters() const
 {
+  if (!m_poly.IsValid())
+    return 0.0;
   return m_poly.GetTotalDistanceM();
 }
 
 double Route::GetCurrentDistanceFromBeginMeters() const
 {
+  if (!m_poly.IsValid())
+    return 0.0;
   return m_poly.GetDistanceFromBeginM();
-}
-
-void Route::GetTurnsDistances(vector<double> & distances) const
-{
-  double mercatorDistance = 0;
-  distances.clear();
-  auto const & polyline = m_poly.GetPolyline();
-  for (auto currentTurn = m_turns.begin(); currentTurn != m_turns.end(); ++currentTurn)
-  {
-    // Skip turns at side points of the polyline geometry. We can't display them properly.
-    if (currentTurn->m_index == 0 || currentTurn->m_index == (polyline.GetSize() - 1))
-      continue;
-
-    uint32_t formerTurnIndex = 0;
-    if (currentTurn != m_turns.begin())
-      formerTurnIndex = (currentTurn - 1)->m_index;
-
-    //TODO (ldragunov) Extract CalculateMercatorDistance higher to avoid including turns generator.
-    double const mercatorDistanceBetweenTurns =
-      turns::CalculateMercatorDistanceAlongPath(formerTurnIndex,  currentTurn->m_index, polyline.GetPoints());
-    mercatorDistance += mercatorDistanceBetweenTurns;
-
-    distances.push_back(mercatorDistance);
-   }
 }
 
 double Route::GetCurrentDistanceToEndMeters() const
 {
+  if (!m_poly.IsValid())
+    return 0.0;
   return m_poly.GetDistanceToEndM();
 }
 
@@ -142,10 +137,10 @@ Route::TTurns::const_iterator Route::GetCurrentTurn() const
 {
   ASSERT(!m_turns.empty(), ());
 
-  turns::TurnItem t;
+  TurnItem t;
   t.m_index = static_cast<uint32_t>(m_poly.GetCurrentIter().m_ind);
   return upper_bound(m_turns.cbegin(), m_turns.cend(), t,
-         [](turns::TurnItem const & lhs, turns::TurnItem const & rhs)
+         [](TurnItem const & lhs, TurnItem const & rhs)
          {
            return lhs.m_index < rhs.m_index;
          });
@@ -178,9 +173,9 @@ void Route::GetStreetNameAfterIdx(uint32_t idx, string & name) const
 
 Route::TStreets::const_iterator Route::GetCurrentStreetNameIterAfter(FollowedPolyline::Iter iter) const
 {
+  // m_streets empty for pedestrian router.
   if (m_streets.empty())
   {
-    ASSERT(false, ());
     return m_streets.cend();
   }
 
@@ -198,7 +193,7 @@ Route::TStreets::const_iterator Route::GetCurrentStreetNameIterAfter(FollowedPol
   return curIter->first == iter.m_ind ? curIter : prevIter;
 }
 
-bool Route::GetCurrentTurn(double & distanceToTurnMeters, turns::TurnItem & turn) const
+bool Route::GetCurrentTurn(double & distanceToTurnMeters, TurnItem & turn) const
 {
   auto it = GetCurrentTurn();
   if (it == m_turns.end())
@@ -214,7 +209,7 @@ bool Route::GetCurrentTurn(double & distanceToTurnMeters, turns::TurnItem & turn
   return true;
 }
 
-bool Route::GetNextTurn(double & distanceToTurnMeters, turns::TurnItem & turn) const
+bool Route::GetNextTurn(double & distanceToTurnMeters, TurnItem & turn) const
 {
   auto it = GetCurrentTurn();
   auto const turnsEnd = m_turns.end();
@@ -222,7 +217,7 @@ bool Route::GetNextTurn(double & distanceToTurnMeters, turns::TurnItem & turn) c
 
   if (it == turnsEnd || (it + 1) == turnsEnd)
   {
-    turn = turns::TurnItem();
+    turn = TurnItem();
     distanceToTurnMeters = 0;
     return false;
   }
@@ -234,16 +229,16 @@ bool Route::GetNextTurn(double & distanceToTurnMeters, turns::TurnItem & turn) c
   return true;
 }
 
-bool Route::GetNextTurns(vector<turns::TurnItemDist> & turns) const
+bool Route::GetNextTurns(vector<TurnItemDist> & turns) const
 {
-  turns::TurnItemDist currentTurn;
+  TurnItemDist currentTurn;
   if (!GetCurrentTurn(currentTurn.m_distMeters, currentTurn.m_turnItem))
     return false;
 
   turns.clear();
   turns.emplace_back(move(currentTurn));
 
-  turns::TurnItemDist nextTurn;
+  TurnItemDist nextTurn;
   if (GetNextTurn(nextTurn.m_distMeters, nextTurn.m_turnItem))
     turns.emplace_back(move(nextTurn));
   return true;
@@ -344,9 +339,101 @@ void Route::Update()
   m_currentTime = 0.0;
 }
 
+// Subroute interface fake implementation ---------------------------------------------------------
+// This implementation is valid for one subroute which is equal to the route.
+size_t Route::GetSubrouteCount() const { return IsValid() ? 1 : 0; }
+
+void Route::GetSubrouteInfo(size_t segmentIdx, std::vector<RouteSegment> & segments) const
+{
+  CHECK_LESS(segmentIdx, GetSubrouteCount(), ());
+  CHECK(IsValid(), ());
+  segments.clear();
+
+  auto const & points = m_poly.GetPolyline().GetPoints();
+  size_t const polySz = m_poly.GetPolyline().GetSize();
+
+  CHECK(!m_turns.empty(), ());
+  CHECK_LESS(m_turns.back().m_index, polySz, ());
+  CHECK(std::is_sorted(m_turns.cbegin(), m_turns.cend(),
+            [](TurnItem const & lhs, TurnItem const & rhs) { return lhs.m_index < rhs.m_index; }),
+        ());
+
+  if (!m_altitudes.empty())
+    CHECK_EQUAL(m_altitudes.size(), polySz, ());
+
+  CHECK(!m_times.empty(), ());
+  CHECK_LESS(m_times.back().first, polySz, ());
+  CHECK(std::is_sorted(m_times.cbegin(), m_times.cend(),
+            [](TTimeItem const & lhs, TTimeItem const & rhs) { return lhs.first < rhs.first; }),
+        ());
+
+  if (!m_traffic.empty())
+    CHECK_EQUAL(m_traffic.size() + 1, polySz, ());
+
+  // |m_index| of the first turn may be equal to zero. If there's a turn at very beginning of the route.
+  // The turn should be skipped in case of segement oriented route which is filled by the method.
+  size_t turnItemIdx = (m_turns[0].m_index == 0 ? 1 : 0);
+  size_t timeIdx = (m_times[0].first ? 1 : 0);
+  double distFromBeginningMeters = 0.0;
+  double distFromBeginningMerc = 0.0;
+  segments.reserve(polySz - 1);
+
+  for (size_t i = 1; i < points.size(); ++i)
+  {
+    TurnItem turn;
+    if (m_turns[turnItemIdx].m_index == i)
+    {
+      turn = m_turns[turnItemIdx];
+      ++turnItemIdx;
+    }
+    CHECK_LESS_OR_EQUAL(turnItemIdx, m_turns.size(), ());
+
+    if (m_times[timeIdx].first == i)
+      ++timeIdx;
+
+    distFromBeginningMeters += MercatorBounds::DistanceOnEarth(points[i - 1], points[i]);
+    distFromBeginningMerc += points[i - 1].Length(points[i]);
+
+    segments.emplace_back(Segment(), turn, GetJunction(i), string(), distFromBeginningMeters,
+                          distFromBeginningMerc, m_times[timeIdx - 1].second,
+                          m_traffic.empty() ? SpeedGroup::Unknown : m_traffic[i - 1]);
+  }
+}
+
+void Route::GetSubrouteAttrs(size_t segmentIdx, SubrouteAttrs & attrs) const
+{
+  CHECK_LESS(segmentIdx, GetSubrouteCount(), ());
+  CHECK(IsValid(), ());
+
+  attrs = SubrouteAttrs(GetJunction(0), GetJunction(m_poly.GetPolyline().GetSize() - 1));
+}
+
+Route::SubrouteSettings const Route::GetSubrouteSettings(size_t segmentIdx) const
+{
+  CHECK_LESS(segmentIdx, GetSubrouteCount(), ());
+  return SubrouteSettings(m_routingSettings, m_router, m_subrouteUid);
+}
+
+void Route::SetSubrouteUid(size_t segmentIdx, SubrouteUid subrouteUid)
+{
+  CHECK_LESS(segmentIdx, GetSubrouteCount(), ());
+  m_subrouteUid = subrouteUid;
+}
+
+Junction Route::GetJunction(size_t pointIdx) const
+{
+  CHECK(IsValid(), ());
+  CHECK_LESS(pointIdx,  m_poly.GetPolyline().GetSize(), ());
+  if (!m_altitudes.empty())
+    CHECK_EQUAL(m_altitudes.size(), m_poly.GetPolyline().GetSize(), ());
+
+  auto const & points = m_poly.GetPolyline().GetPoints();
+  return Junction(points[pointIdx],
+                  m_altitudes.empty() ? feature::kInvalidAltitude : m_altitudes[pointIdx]);
+}
+
 string DebugPrint(Route const & r)
 {
   return DebugPrint(r.m_poly.GetPolyline());
 }
-
 } // namespace routing

@@ -1,5 +1,3 @@
-#import "Macros.h"
-
 static inline CGPoint SubtractCGPoint(CGPoint p1, CGPoint p2)
 {
   return CGPointMake(p1.x - p2.x, p1.y - p2.y);
@@ -23,7 +21,7 @@ static inline CGFloat LengthCGPoint(CGPoint point)
 @interface NSObject (Optimized)
 
 + (NSString *)className;
-- (void)performAfterDelay:(NSTimeInterval)delayInSec block:(TMWMVoidBlock)block;
+- (void)performAfterDelay:(NSTimeInterval)delayInSec block:(MWMVoidBlock)block;
 
 @end
 
@@ -49,7 +47,13 @@ static inline CGFloat LengthCGPoint(CGPoint point)
 @property (nonatomic) CGFloat height;
 @property (nonatomic) CGSize size;
 
-+ (void)animateWithDuration:(NSTimeInterval)duration delay:(NSTimeInterval)delay damping:(double)dampingRatio initialVelocity:(double)springVelocity options:(UIViewAnimationOptions)options animations:(TMWMVoidBlock)animations completion:(void (^)(BOOL finished))completion;
++ (void)animateWithDuration:(NSTimeInterval)duration
+                      delay:(NSTimeInterval)delay
+                    damping:(double)dampingRatio
+            initialVelocity:(double)springVelocity
+                    options:(UIViewAnimationOptions)options
+                 animations:(MWMVoidBlock)animations
+                 completion:(void (^)(BOOL finished))completion;
 - (void)sizeToIntegralFit;
 
 @end
@@ -57,12 +61,6 @@ static inline CGFloat LengthCGPoint(CGPoint point)
 @interface UIView (Refresh)
 
 - (void)mwm_refreshUI;
-
-@end
-
-@interface UIImageView (IOS7Workaround)
-
-- (void)makeImageAlwaysTemplate;
 
 @end
 
@@ -102,6 +100,12 @@ typedef void (^MWMAlertViewCompletionBlock) (UIAlertView * alertView, NSInteger 
 
 - (BOOL)shouldAutorotate;
 - (NSUInteger)supportedInterfaceOrientations;
+
+@end
+
+@interface UIViewController (Safari)
+
+- (void)openUrl:(NSURL *)url;
 
 @end
 

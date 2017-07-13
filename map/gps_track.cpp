@@ -3,6 +3,8 @@
 #include "base/assert.hpp"
 #include "base/logging.hpp"
 
+#include "std/algorithm.hpp"
+
 namespace
 {
 
@@ -123,9 +125,9 @@ void GpsTrack::ScheduleTask()
 {
   lock_guard<mutex> lg(m_threadGuard);
 
-  if (m_thread.get_id() == thread::id())
+  if (m_thread.get_id() == std::thread::id())
   {
-    m_thread = thread([this]()
+    m_thread = threads::SimpleThread([this]()
     {
       unique_lock<mutex> ul(m_threadGuard);
       while (true)
@@ -154,9 +156,9 @@ void GpsTrack::InitStorageIfNeed()
   {
     m_storage = make_unique<GpsTrackStorage>(m_filePath, m_maxItemCount);
   }
-  catch (RootException & e)
+  catch (RootException const & e)
   {
-    LOG(LINFO, ("Storage has not been created:", e.Msg()));
+    LOG(LWARNING, ("Track storage creation error:", e.Msg()));
   }
 }
 
@@ -203,9 +205,9 @@ void GpsTrack::InitCollection(hours duration)
       m_collection->Add(points, evictedIds);
     }
   }
-  catch (RootException & e)
+  catch (RootException const & e)
   {
-    LOG(LINFO, ("Storage has caused exception:", e.Msg()));
+    LOG(LWARNING, ("Track storage exception:", e.Msg()));
     m_collection->Clear();
     m_storage.reset();
   }
@@ -266,9 +268,9 @@ void GpsTrack::UpdateStorage(bool needClear, vector<location::GpsInfo> const & p
 
     m_storage->Append(points);
   }
-  catch (RootException & e)
+  catch (RootException const & e)
   {
-    LOG(LINFO, ("Storage has caused exception:", e.Msg()));
+    LOG(LWARNING, ("Track storage exception:", e.Msg()));
     m_storage.reset();
   }
 }

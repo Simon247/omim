@@ -3,7 +3,6 @@
 #import "MWMAlertViewController.h"
 #import "MWMTableViewCell.h"
 #import "MWMTableViewController.h"
-#import "UIColor+MapsMeColor.h"
 
 #import "3party/Alohalytics/src/alohalytics_objc.h"
 
@@ -23,7 +22,7 @@
 - (void)mwm_refreshUI
 {
   [self.navigationController.navigationBar mwm_refreshUI];
-  MapViewController * mapViewController = [MapsAppDelegate theApp].mapViewController;
+  MapViewController * mapViewController = [MapViewController controller];
   for (UIViewController * vc in self.navigationController.viewControllers.reverseObjectEnumerator)
   {
     if (![vc isEqual:mapViewController])
@@ -38,7 +37,10 @@
   self.tableView.backgroundColor = [UIColor pressBackground];
   self.tableView.separatorColor = [UIColor blackDividers];
   [self.navigationController.navigationBar setTranslucent:NO];
-  [self.tableView registerClass:[MWMTableViewCell class] forCellReuseIdentifier:[UITableViewCell className]];
+  [self.tableView registerClass:[MWMTableViewCell class]
+         forCellReuseIdentifier:[UITableViewCell className]];
+  [self.tableView registerClass:[MWMTableViewSubtitleCell class]
+         forCellReuseIdentifier:[MWMTableViewSubtitleCell className]];
 }
 
 - (void)viewWillAppear:(BOOL)animated

@@ -14,12 +14,12 @@
 #include "std/iostream.hpp"
 #include "std/target_os.hpp"
 
+#include <unordered_map>
 
 class LineDefProto;
 class AreaRuleProto;
 class SymbolRuleProto;
 class CaptionDefProto;
-class CircleRuleProto;
 class ShieldRuleProto;
 class ContainerProto;
 class FeatureType;
@@ -56,7 +56,6 @@ namespace drule
     virtual SymbolRuleProto const * GetSymbol() const;
     virtual CaptionDefProto const * GetCaption(int) const;
     virtual text_type_t GetCaptionTextType(int) const;
-    virtual CircleRuleProto const * GetCircle() const;
     virtual ShieldRuleProto const * GetShield() const;
 
     // Test feature by runtime feature style selector
@@ -80,6 +79,8 @@ namespace drule
     /// background color for scales in range [0...scales::UPPER_STYLE_SCALE]
     vector<uint32_t> m_bgColors;
 
+    std::unordered_map<std::string, uint32_t> m_colors;
+
   public:
     RulesHolder();
     ~RulesHolder();
@@ -94,6 +95,7 @@ namespace drule
     BaseRule const * Find(Key const & k) const;
 
     uint32_t GetBgColor(int scale) const;
+    uint32_t GetColor(std::string const & name) const;
 
 #ifdef OMIM_OS_DESKTOP
     void LoadFromTextProto(string const & buffer);
@@ -120,9 +122,9 @@ namespace drule
 
   private:
     void InitBackgroundColors(ContainerProto const & cp);
+    void InitColors(ContainerProto const & cp);
   };
 
-  RulesHolder & rules(MapStyle mapStyle);
   RulesHolder & rules();
 
   void LoadRules();

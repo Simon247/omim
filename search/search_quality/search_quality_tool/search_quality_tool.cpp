@@ -1,21 +1,19 @@
-#include "search/params.hpp"
+#include "search/search_params.hpp"
 
 #include "indexer/classificator_loader.hpp"
 #include "indexer/data_header.hpp"
 #include "indexer/index.hpp"
 #include "indexer/mwm_set.hpp"
 
-#include "storage/country_info_getter.hpp"
-#include "storage/storage.hpp"
-
 #include "geometry/mercator.hpp"
 #include "geometry/point2d.hpp"
 
+#include "search/processor_factory.hpp"
+#include "search/ranking_info.hpp"
 #include "search/result.hpp"
 #include "search/search_quality/helpers.hpp"
 #include "search/search_tests_support/test_search_engine.hpp"
 #include "search/search_tests_support/test_search_request.hpp"
-#include "search/v2/ranking_info.hpp"
 
 #include "platform/country_file.hpp"
 #include "platform/local_country_file.hpp"
@@ -41,6 +39,7 @@
 #include "std/fstream.hpp"
 #include "std/iomanip.hpp"
 #include "std/iostream.hpp"
+#include "std/limits.hpp"
 #include "std/map.hpp"
 #include "std/numeric.hpp"
 #include "std/sstream.hpp"
@@ -81,23 +80,12 @@ struct CompletenessQuery
   string m_query;
   unique_ptr<TestSearchRequest> m_request;
   string m_mwmName;
-  uint64_t m_featureId = 0;
+  uint32_t m_featureId = 0;
   double m_lat = 0;
   double m_lon = 0;
 };
 
 DECLARE_EXCEPTION(MalformedQueryException, RootException);
-
-class SearchQueryV2Factory : public SearchQueryFactory
-{
-  // SearchQueryFactory overrides:
-  unique_ptr<Query> BuildSearchQuery(Index & index, CategoriesHolder const & categories,
-                                     vector<Suggest> const & suggests,
-                                     storage::CountryInfoGetter const & infoGetter) override
-  {
-    return make_unique<v2::SearchQueryV2>(index, categories, suggests, infoGetter);
-  }
-};
 
 void DidDownload(TCountryId const & /* countryId */,
                  shared_ptr<platform::LocalCountryFile> const & /* localFile */)
@@ -210,17 +198,17 @@ void Split(string const & s, char delim, vector<string> & parts)
 
 // Returns the position of the result that is expected to be found by geocoder completeness
 // tests in the |result| vector or -1 if it does not occur there.
-int FindResult(TestSearchEngine & engine, string const & mwmName, uint64_t const featureId,
+int FindResult(TestSearchEngine & engine, string const & mwmName, uint32_t const featureId,
                double const lat, double const lon, vector<Result> const & results)
 {
+  CHECK_LESS_OR_EQUAL(results.size(), numeric_limits<int>::max(), ());
   auto const mwmId = engine.GetMwmIdByCountryFile(platform::CountryFile(mwmName));
   FeatureID const expectedFeatureId(mwmId, featureId);
   for (size_t i = 0; i < results.size(); ++i)
   {
     auto const & r = results[i];
-    auto const featureId = r.GetFeatureID();
-    if (featureId == expectedFeatureId)
-      return i;
+    if (r.GetFeatureID() == expectedFeatureId)
+      return static_cast<int>(i);
   }
 
   // Another attempt. If the queries are stale, feature id is useless.
@@ -235,7 +223,7 @@ int FindResult(TestSearchEngine & engine, string const & mwmName, uint64_t const
       double const dist = MercatorBounds::DistanceOnEarth(r.GetFeatureCenter(),
                                                           MercatorBounds::FromLatLon(lat, lon));
       LOG(LDEBUG, ("dist =", dist));
-      return i;
+      return static_cast<int>(i);
     }
   }
   return -1;
@@ -282,7 +270,7 @@ void ParseCompletenessQuery(string & s, CompletenessQuery & q)
 
   q.m_query = country + " " + city + " " + street + " " + house + " ";
   q.m_mwmName = mwmName;
-  q.m_featureId = featureId;
+  q.m_featureId = static_cast<uint32_t>(featureId);
   q.m_lat = lat;
   q.m_lon = lon;
 }
@@ -330,7 +318,7 @@ void CheckCompleteness(string const & path, m2::RectD const & viewport, TestSear
 
   for (auto & q : queries)
   {
-    q.m_request->Wait();
+    q.m_request->Run();
 
     LOG(LDEBUG, (q.m_query, q.m_request->Results()));
     int pos =
@@ -390,7 +378,7 @@ int main(int argc, char * argv[])
   Engine::Params params;
   params.m_locale = FLAGS_locale;
   params.m_numThreads = FLAGS_num_threads;
-  TestSearchEngine engine(move(infoGetter), make_unique<SearchQueryV2Factory>(), Engine::Params{});
+  TestSearchEngine engine(move(infoGetter), make_unique<ProcessorFactory>(), Engine::Params{});
 
   vector<platform::LocalCountryFile> mwms;
   if (!FLAGS_mwm_list_path.empty())
@@ -465,14 +453,14 @@ int main(int argc, char * argv[])
 
   if (dumpCSV)
   {
-    v2::RankingInfo::PrintCSVHeader(csv);
+    RankingInfo::PrintCSVHeader(csv);
     csv << endl;
   }
 
   vector<double> responseTimes(queries.size());
   for (size_t i = 0; i < queries.size(); ++i)
   {
-    requests[i]->Wait();
+    requests[i]->Run();
     auto rt = duration_cast<milliseconds>(requests[i]->ResponseTime()).count();
     responseTimes[i] = static_cast<double>(rt) / 1000;
     PrintTopResults(MakePrefixFree(queries[i]), requests[i]->Results(), FLAGS_top,

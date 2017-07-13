@@ -1,11 +1,11 @@
 #include "drape_frontend/path_symbol_shape.hpp"
+#include "drape_frontend/shader_def.hpp"
 #include "drape_frontend/visual_params.hpp"
 
 #include "drape/utils/vertex_decl.hpp"
 #include "drape/glsl_types.hpp"
 #include "drape/glsl_func.hpp"
 #include "drape/overlay_handle.hpp"
-#include "drape/shader_def.hpp"
 #include "drape/attribute_provider.hpp"
 #include "drape/texture_manager.hpp"
 #include "drape/glstate.hpp"
@@ -27,9 +27,9 @@ void PathSymbolShape::Draw(ref_ptr<dp::Batcher> batcher, ref_ptr<dp::TextureMana
   textures->GetSymbolRegion(m_params.m_symbolName, region);
   m2::RectF const & rect = region.GetTexRect();
 
-  m2::PointU pixelSize = region.GetPixelSize();
-  float halfW = pixelSize.x / 2.0f;
-  float halfH = pixelSize.y / 2.0f;
+  m2::PointF pixelSize = region.GetPixelSize();
+  float halfW = 0.5f * pixelSize.x;
+  float halfH = 0.5f * pixelSize.y;
 
   gpu::TSolidTexVertexBuffer buffer;
 
@@ -40,13 +40,9 @@ void PathSymbolShape::Draw(ref_ptr<dp::Batcher> batcher, ref_ptr<dp::TextureMana
   glsl::vec2 dummy(0.0, 0.0);
   while (!splineIter.BeginAgain())
   {
-    glsl::vec2 pivot = glsl::ToVec2(splineIter.m_pos);
+    glsl::vec2 const pivot = glsl::ToVec2(ConvertToLocal(splineIter.m_pos, m_params.m_tileCenter, kShapeCoordScalar));
     glsl::vec2 n = halfH * glsl::normalize(glsl::vec2(-splineIter.m_dir.y, splineIter.m_dir.x));
     glsl::vec2 d = halfW * glsl::normalize(glsl::vec2(splineIter.m_dir.x, splineIter.m_dir.y));
-    float nLength = glsl::length(n) * pToGScale;
-    float dLength = glsl::length(d) * pToGScale;
-    n = nLength * glsl::normalize(n);
-    d = dLength * glsl::normalize(d);
 
     buffer.emplace_back(gpu::SolidTexturingVertex(glsl::vec4(pivot, m_params.m_depth, 0.0f), - d - n, glsl::ToVec2(rect.LeftTop())));
     buffer.emplace_back(gpu::SolidTexturingVertex(glsl::vec4(pivot, m_params.m_depth, 0.0f), - d + n, glsl::ToVec2(rect.LeftBottom())));
@@ -61,7 +57,7 @@ void PathSymbolShape::Draw(ref_ptr<dp::Batcher> batcher, ref_ptr<dp::TextureMana
   dp::GLState state(gpu::PATH_SYMBOL_LINE, dp::GLState::GeometryLayer);
   state.SetColorTexture(region.GetTexture());
 
-  dp::AttributeProvider provider(1, buffer.size());
+  dp::AttributeProvider provider(1, static_cast<uint32_t>(buffer.size()));
   provider.InitStream(0, gpu::SolidTexturingVertex::GetBindingInfo(), make_ref(buffer.data()));
   batcher->InsertListOfStrip(state, make_ref(&provider), 4);
 }

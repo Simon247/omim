@@ -1,6 +1,6 @@
 #include "testing/testing.hpp"
 
-#include "search/search_string_intersection.hpp"
+#include "search/string_intersection.hpp"
 
 #include "indexer/feature_covering.hpp"
 
@@ -29,8 +29,12 @@ struct TestData
 
     va_list ap;
     va_start(ap, resCount);
-    for(int i = 0; i < resCount; i++)
-      AddResult(va_arg(ap, int), va_arg(ap, int));
+    for (size_t i = 0; i < resCount; ++i)
+    {
+      uint16_t const pos = va_arg(ap, int);
+      uint16_t const len = va_arg(ap, int);
+      AddResult(pos, len);
+    }
     va_end(ap);
   }
 

@@ -1,17 +1,19 @@
 #include "search/search_tests_support/test_results_matching.hpp"
 
-#include "search/search_tests_support/test_feature.hpp"
+#include "generator/generator_tests_support/test_feature.hpp"
 
 #include "indexer/feature_decl.hpp"
 #include "indexer/index.hpp"
 
 #include "std/sstream.hpp"
 
+using namespace generator::tests_support;
+
 namespace search
 {
 namespace tests_support
 {
-ExactMatchingRule::ExactMatchingRule(MwmSet::MwmId const & mwmId, TestFeature & feature)
+ExactMatchingRule::ExactMatchingRule(MwmSet::MwmId const & mwmId, TestFeature const & feature)
   : m_mwmId(mwmId), m_feature(feature)
 {
 }

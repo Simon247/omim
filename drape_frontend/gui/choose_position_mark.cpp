@@ -1,7 +1,6 @@
-#include "choose_position_mark.hpp"
-#include "drape_gui.hpp"
-
-#include "drape/shader_def.hpp"
+#include "drape_frontend/gui/choose_position_mark.hpp"
+#include "drape_frontend/gui/drape_gui.hpp"
+#include "drape_frontend/shader_def.hpp"
 
 #include "drape/utils/vertex_decl.hpp"
 
@@ -37,7 +36,7 @@ public:
 
   bool Update(ScreenBase const & screen) override
   {
-    SetPivot(glsl::ToVec2(m2::PointF(screen.PixelRect().Center())));
+    SetPivot(glsl::ToVec2(m2::PointF(screen.PixelRectIn3d().Center())));
     return TBase::Update(screen);
   }
 };
@@ -48,7 +47,7 @@ drape_ptr<ShapeRenderer> ChoosePositionMark::Draw(ref_ptr<dp::TextureManager> te
 {
   dp::TextureManager::SymbolRegion region;
   tex->GetSymbolRegion("cross_geoposition", region);
-  glsl::vec2 const halfSize = glsl::ToVec2(m2::PointD(region.GetPixelSize()) * 0.5);
+  glsl::vec2 const halfSize = glsl::ToVec2(region.GetPixelSize() * 0.5f);
   m2::RectF const texRect = region.GetTexRect();
 
   ASSERT_EQUAL(m_position.m_anchor, dp::Center, ());

@@ -1,6 +1,6 @@
 #include "reverse_geocoder.hpp"
 
-#include "search/v2/mwm_context.hpp"
+#include "search/mwm_context.hpp"
 
 #include "indexer/feature.hpp"
 #include "indexer/feature_algo.hpp"
@@ -44,14 +44,14 @@ void ReverseGeocoder::GetNearbyStreets(MwmSet::MwmId const & id, m2::PointD cons
 
     ASSERT(!name.empty(), ());
 
-    streets.push_back({ft.GetID(), feature::GetMinDistanceMeters(ft, center), name});
+    streets.emplace_back(ft.GetID(), feature::GetMinDistanceMeters(ft, center), name);
   };
 
   MwmSet::MwmHandle mwmHandle = m_index.GetMwmHandleById(id);
   if (mwmHandle.IsAlive())
   {
-    search::v2::MwmContext(move(mwmHandle)).ForEachFeature(rect, addStreet);
-    sort(streets.begin(), streets.end(), my::CompareBy(&Street::m_distanceMeters));
+    search::MwmContext(move(mwmHandle)).ForEachFeature(rect, addStreet);
+    sort(streets.begin(), streets.end(), my::LessBy(&Street::m_distanceMeters));
   }
 }
 
@@ -125,7 +125,7 @@ void ReverseGeocoder::GetNearbyAddress(m2::PointD const & center, Address & addr
   }
 }
 
-bool ReverseGeocoder::GetExactAddress(FeatureType & ft, Address & addr) const
+bool ReverseGeocoder::GetExactAddress(FeatureType const & ft, Address & addr) const
 {
   if (ft.GetHouseNumber().empty())
     return false;
@@ -174,11 +174,11 @@ void ReverseGeocoder::GetNearbyBuildings(m2::PointD const & center, vector<Build
   };
 
   m_index.ForEachInRect(addBuilding, rect, kQueryScale);
-  sort(buildings.begin(), buildings.end(), my::CompareBy(&Building::m_distanceMeters));
+  sort(buildings.begin(), buildings.end(), my::LessBy(&Building::m_distanceMeters));
 }
 
 // static
-ReverseGeocoder::Building ReverseGeocoder::FromFeature(FeatureType & ft, double distMeters)
+ReverseGeocoder::Building ReverseGeocoder::FromFeature(FeatureType const & ft, double distMeters)
 {
   return { ft.GetID(), distMeters, ft.GetHouseNumber(), feature::GetCenter(ft) };
 }
@@ -199,7 +199,7 @@ bool ReverseGeocoder::HouseTable::Get(FeatureID const & fid, uint32_t & streetIn
       LOG(LWARNING, ("MWM", fid, "is dead"));
       return false;
     }
-    m_table = search::v2::HouseToStreetTable::Load(*m_handle.GetValue<MwmValue>());
+    m_table = search::HouseToStreetTable::Load(*m_handle.GetValue<MwmValue>());
   }
 
   return m_table->Get(fid.m_index, streetIndex);

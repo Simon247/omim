@@ -2,7 +2,10 @@ package com.mapswithme.maps.bookmarks;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.support.annotation.CallSuper;
 import android.support.annotation.LayoutRes;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v7.widget.RecyclerView;
 import android.view.MenuItem;
 import android.view.View;
@@ -12,6 +15,7 @@ import com.mapswithme.maps.base.BaseMwmRecyclerFragment;
 import com.mapswithme.maps.bookmarks.data.BookmarkCategory;
 import com.mapswithme.maps.bookmarks.data.BookmarkManager;
 import com.mapswithme.maps.dialog.EditTextDialogFragment;
+import com.mapswithme.maps.widget.PlaceholderView;
 import com.mapswithme.maps.widget.recycler.RecyclerClickListener;
 import com.mapswithme.maps.widget.recycler.RecyclerLongClickListener;
 import com.mapswithme.util.BottomSheetHelper;
@@ -28,7 +32,7 @@ public class BookmarkCategoriesFragment extends BaseMwmRecyclerFragment
   @Override
   protected @LayoutRes int getLayoutRes()
   {
-    return R.layout.recycler_default;
+    return R.layout.fragment_search_base;
   }
 
   @Override
@@ -37,26 +41,47 @@ public class BookmarkCategoriesFragment extends BaseMwmRecyclerFragment
     return new BookmarkCategoriesAdapter(getActivity());
   }
 
+  @Nullable
   @Override
   protected BookmarkCategoriesAdapter getAdapter()
   {
-    return (BookmarkCategoriesAdapter)super.getAdapter();
+    RecyclerView.Adapter adapter = super.getAdapter();
+    return adapter != null ? (BookmarkCategoriesAdapter) adapter : null;
   }
 
+  @CallSuper
   @Override
-  public void onViewCreated(View view, Bundle savedInstanceState)
+  public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState)
   {
     super.onViewCreated(view, savedInstanceState);
 
-    getAdapter().setOnClickListener(this);
-    getAdapter().setOnLongClickListener(this);
+    if (getAdapter() != null)
+    {
+      getAdapter().setOnClickListener(this);
+      getAdapter().setOnLongClickListener(this);
+      getAdapter().registerAdapterDataObserver(new RecyclerView.AdapterDataObserver()
+      {
+        @Override
+        public void onChanged()
+        {
+          updateResultsPlaceholder();
+        }
+      });
+    }
+  }
+
+  private void updateResultsPlaceholder()
+  {
+    if (getAdapter() != null)
+      showPlaceholder(getAdapter().getItemCount() == 0);
   }
 
   @Override
   public void onResume()
   {
     super.onResume();
-    getAdapter().notifyDataSetChanged();
+    if (getAdapter() != null)
+      getAdapter().notifyDataSetChanged();
   }
 
   @Override
@@ -71,7 +96,8 @@ public class BookmarkCategoriesFragment extends BaseMwmRecyclerFragment
   {
     final BookmarkCategory category = BookmarkManager.INSTANCE.getCategory(mSelectedPosition);
     category.setName(text);
-    getAdapter().notifyDataSetChanged();
+    if (getAdapter() != null)
+      getAdapter().notifyDataSetChanged();
   }
 
   @Override
@@ -81,7 +107,8 @@ public class BookmarkCategoriesFragment extends BaseMwmRecyclerFragment
     {
     case R.id.set_show:
       BookmarkManager.INSTANCE.toggleCategoryVisibility(mSelectedPosition);
-      getAdapter().notifyDataSetChanged();
+      if (getAdapter() != null)
+        getAdapter().notifyDataSetChanged();
       break;
 
     case R.id.set_share:
@@ -90,7 +117,8 @@ public class BookmarkCategoriesFragment extends BaseMwmRecyclerFragment
 
     case R.id.set_delete:
       BookmarkManager.INSTANCE.nativeDeleteCategory(mSelectedPosition);
-      getAdapter().notifyDataSetChanged();
+      if (getAdapter() != null)
+        getAdapter().notifyDataSetChanged();
       break;
 
     case R.id.set_edit:
@@ -125,5 +153,11 @@ public class BookmarkCategoriesFragment extends BaseMwmRecyclerFragment
   {
     startActivity(new Intent(getActivity(), BookmarkListActivity.class)
                       .putExtra(ChooseBookmarkCategoryFragment.CATEGORY_ID, position));
+  }
+
+  @Override
+  protected void setupPlaceholder(@NonNull PlaceholderView placeholder)
+  {
+    placeholder.setContent(R.drawable.img_bookmarks, R.string.bookmarks_empty_title, R.string.bookmarks_usage_hint);
   }
 }

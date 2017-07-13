@@ -14,51 +14,47 @@
 #include "base/string_utils.hpp"
 #include "base/buffer_vector.hpp"
 
-#include "std/vector.hpp"
-#include "std/shared_ptr.hpp"
+#include <memory>
+#include <vector>
 
 namespace dp
 {
-  class OverlayHandle;
-}
+class OverlayHandle;
+}  // namespace dp
 
 namespace df
 {
-
 class TextLayout
 {
-
 public:
   virtual ~TextLayout() {}
 
+  void Init(strings::UniString const & text,
+            float fontSize, bool isSdf,
+            ref_ptr<dp::TextureManager> textures);
+
   ref_ptr<dp::Texture> GetMaskTexture() const;
-
   uint32_t GetGlyphCount() const;
-
   float GetPixelLength() const;
   float GetPixelHeight() const;
-
+  int GetFixedHeight() const { return m_fixedHeight; }
   strings::UniString const & GetText() const;
 
 protected:
-  void Init(strings::UniString const & text,
-            float fontSize,
-            ref_ptr<dp::TextureManager> textures);
-
-protected:
-  typedef dp::TextureManager::GlyphRegion GlyphRegion;
+  using GlyphRegion = dp::TextureManager::GlyphRegion;
 
   dp::TextureManager::TGlyphsBuffer m_metrics;
   strings::UniString m_text;
   float m_textSizeRatio = 0.0f;
+  int m_fixedHeight = dp::GlyphManager::kDynamicGlyphSize;
 };
 
 class StraightTextLayout : public TextLayout
 {
-  typedef TextLayout TBase;
+  using TBase = TextLayout;
 public:
   StraightTextLayout(strings::UniString const & text,
-                     float fontSize,
+                     float fontSize, bool isSdf,
                      ref_ptr<dp::TextureManager> textures,
                      dp::Anchor anchor);
 
@@ -73,19 +69,19 @@ public:
              gpu::TTextStaticVertexBuffer & staticBuffer,
              gpu::TTextDynamicVertexBuffer & dynamicBuffer) const;
 
-  m2::PointU const & GetPixelSize() const { return m_pixelSize; }
+  m2::PointF const & GetPixelSize() const { return m_pixelSize; }
 
 private:
   buffer_vector<pair<size_t, glsl::vec2>, 2> m_offsets;
-  m2::PointU m_pixelSize;
+  m2::PointF m_pixelSize;
 };
 
 class PathTextLayout : public TextLayout
 {
-  typedef TextLayout TBase;
+  using TBase = TextLayout;
 public:
-  PathTextLayout(strings::UniString const & text,
-                 float fontSize, ref_ptr<dp::TextureManager> textures);
+  PathTextLayout(m2::PointD const & tileCenter, strings::UniString const & text,
+                 float fontSize, bool isSdf, ref_ptr<dp::TextureManager> textures);
 
   void CacheStaticGeometry(dp::TextureManager::ColorRegion const & colorRegion,
                            dp::TextureManager::ColorRegion const & outlineRegion,
@@ -99,19 +95,21 @@ public:
                             m2::PointD const & globalPivot,
                             gpu::TTextDynamicVertexBuffer & buffer) const;
 
-  static bool CalculatePerspectivePosition(float splineLength, float textPixelLength,
-                                           float & offset);
+  static bool CalculatePerspectivePosition(float pixelSplineLength, float textPixelLength,
+                                           uint32_t textIndex, float & offset);
 
-  static void CalculatePositions(vector<float> & offsets, float splineLength,
-                                 float splineScaleToPixel, float textPixelLength);
-
+  static void CalculatePositions(float splineLength, float splineScaleToPixel,
+                                 float textPixelLength, std::vector<float> & offsets);
 private:
   static float CalculateTextLength(float textPixelLength);
+
+  m2::PointD m_tileCenter;
 };
 
 class SharedTextLayout
 {
 public:
+  SharedTextLayout() = default;
   SharedTextLayout(PathTextLayout * layout);
 
   bool IsNull() const;
@@ -122,7 +120,6 @@ public:
   PathTextLayout const * operator->() const;
 
 private:
-  shared_ptr<PathTextLayout> m_layout;
+  std::shared_ptr<PathTextLayout> m_layout;
 };
-
-}
+}  // namespace df

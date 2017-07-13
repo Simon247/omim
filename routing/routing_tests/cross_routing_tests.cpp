@@ -154,5 +154,23 @@ UNIT_TEST(TestFindingByPoint)
   TEST_EQUAL(node.size(), 2, ());
   TEST_EQUAL(node[0].m_nodeId, 5, ());
   TEST_EQUAL(node[1].m_nodeId, 6, ());
+
+  vector<OutgoingCrossNode> outgoingNode;
+  auto fnOutgoing = [&outgoingNode](OutgoingCrossNode const & nd) {outgoingNode.push_back(nd);};
+  TEST(newContext.ForEachOutgoingNodeNearPoint(ms::LatLon::Zero(), fnOutgoing), ());
+  TEST_EQUAL(outgoingNode.size(), 1, ());
+  TEST_EQUAL(outgoingNode[0].m_nodeId, 4, ());
+
+  outgoingNode.clear();
+  TEST(!newContext.ForEachOutgoingNodeNearPoint(p3, fnOutgoing), ());
+  TEST(outgoingNode.empty(), ());
+}
+UNIT_TEST(TestCrossWeightedEdgeComparator)
+{
+  CrossNode const from(0, Index::MwmId(), ms::LatLon::Zero());
+  CrossWeightedEdge const lhs(BorderCross(from, {1, Index::MwmId(), ms::LatLon::Zero()}), 2.0);
+  CrossWeightedEdge const rhs(BorderCross(from, {2, Index::MwmId(), ms::LatLon::Zero()}), 1.0);
+
+  TEST(lhs < rhs || rhs < lhs || lhs == rhs, ());
 }
 }  // namespace

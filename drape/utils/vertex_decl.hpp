@@ -40,6 +40,21 @@ struct Area3dVertex : BaseVertex
   static dp::BindingInfo const & GetBindingInfo();
 };
 
+struct HatchingAreaVertex : BaseVertex
+{
+  using TMaskTexCoord = glsl::vec2;
+
+  HatchingAreaVertex();
+  HatchingAreaVertex(TPosition const & position, TTexCoord const & colorTexCoord,
+                     TMaskTexCoord const & maskTexCoord);
+
+  TPosition m_position;
+  TTexCoord m_colorTexCoord;
+  TMaskTexCoord m_maskTexCoord;
+
+  static dp::BindingInfo const & GetBindingInfo();
+};
+
 struct SolidTexturingVertex : BaseVertex
 {
   SolidTexturingVertex();
@@ -52,7 +67,20 @@ struct SolidTexturingVertex : BaseVertex
   static dp::BindingInfo const & GetBindingInfo();
 };
 
-typedef buffer_vector<SolidTexturingVertex, 128> TSolidTexVertexBuffer;
+using TSolidTexVertexBuffer = buffer_vector<SolidTexturingVertex, 128>;
+
+struct MaskedTexturingVertex : BaseVertex
+{
+  MaskedTexturingVertex();
+  MaskedTexturingVertex(TPosition3d const & position, TNormal const & normal,
+                        TTexCoord const & colorTexCoord, TTexCoord const & maskTexCoord);
+  TPosition3d m_position;
+  TNormal m_normal;
+  TTexCoord m_colorTexCoord;
+  TTexCoord m_maskTexCoord;
+
+  static dp::BindingInfo const & GetBindingInfo();
+};
 
 struct TextStaticVertex : BaseVertex
 {
@@ -65,7 +93,7 @@ struct TextStaticVertex : BaseVertex
   static dp::BindingInfo const & GetBindingInfo();
 };
 
-typedef buffer_vector<TextStaticVertex, 128> TTextStaticVertexBuffer;
+using TTextStaticVertexBuffer = buffer_vector<TextStaticVertex, 128>;
 
 struct TextOutlinedStaticVertex : BaseVertex
 {
@@ -81,7 +109,7 @@ public:
   static dp::BindingInfo const & GetBindingInfo();
 };
 
-typedef buffer_vector<TextOutlinedStaticVertex, 128> TTextOutlinedStaticVertexBuffer;
+using TTextOutlinedStaticVertexBuffer = buffer_vector<TextOutlinedStaticVertex, 128>;
 
 struct TextDynamicVertex : BaseVertex
 {
@@ -95,7 +123,7 @@ struct TextDynamicVertex : BaseVertex
   static uint32_t GetDynamicStreamID();
 };
 
-typedef buffer_vector<TextDynamicVertex, 128> TTextDynamicVertexBuffer;
+using TTextDynamicVertexBuffer = buffer_vector<TextDynamicVertex, 128>;
 
 struct LineVertex : BaseVertex
 {
@@ -130,14 +158,33 @@ struct DashedLineVertex : BaseVertex
 
 struct RouteVertex : BaseVertex
 {
-  typedef glsl::vec3 TLength;
+  using TLength = glsl::vec3;
+  using TColor = glsl::vec4;
 
   RouteVertex();
-  RouteVertex(TPosition const & position, TNormal const & normal, TLength const & length);
+  RouteVertex(TPosition const & position, TNormal const & normal,
+              TLength const & length, TColor const & color);
 
   TPosition m_position;
   TNormal m_normal;
   TLength m_length;
+  TColor m_color;
+
+  static dp::BindingInfo const & GetBindingInfo();
+};
+
+struct ColoredSymbolVertex : BaseVertex
+{
+  using TNormal = glsl::vec4;
+  using TTexCoord = glsl::vec4;
+
+  ColoredSymbolVertex();
+  ColoredSymbolVertex(TPosition const & position, TNormal const & normal,
+                      TTexCoord const & colorTexCoord);
+
+  TPosition m_position;
+  TNormal m_normal;
+  TTexCoord m_colorTexCoord;
 
   static dp::BindingInfo const & GetBindingInfo();
 };

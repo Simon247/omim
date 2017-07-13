@@ -29,9 +29,10 @@ namespace
 
     return drule::text_type_name;
   }
-}
+} // namespace
 
-namespace drule {
+namespace drule
+{
 
 BaseRule::BaseRule() : m_type(node | way)
 {}
@@ -94,11 +95,6 @@ text_type_t BaseRule::GetCaptionTextType(int) const
   return text_type_name;
 }
 
-CircleRuleProto const * BaseRule::GetCircle() const
-{
-  return 0;
-}
-
 ShieldRuleProto const * BaseRule::GetShield() const
 {
   return nullptr;
@@ -136,6 +132,7 @@ void RulesHolder::Clean()
   }
 
   m_rules.clear();
+  m_colors.clear();
 }
 
 Key RulesHolder::AddRule(int scale, rule_type_t type, BaseRule * p)
@@ -170,9 +167,20 @@ BaseRule const * RulesHolder::Find(Key const & k) const
 
 uint32_t RulesHolder::GetBgColor(int scale) const
 {
-  ASSERT_LESS(scale, m_bgColors.size(), ());
+  ASSERT_LESS(scale, static_cast<int>(m_bgColors.size()), ());
   ASSERT_GREATER_OR_EQUAL(scale, 0, ());
   return m_bgColors[scale];
+}
+
+uint32_t RulesHolder::GetColor(std::string const & name) const
+{
+  auto const it = m_colors.find(name);
+  if (it == m_colors.end())
+  {
+    LOG(LWARNING, ("Requested color '" + name + "' is not found"));
+    return 0;
+  }
+  return it->second;
 }
 
 void RulesHolder::ClearCaches()
@@ -185,13 +193,14 @@ void RulesHolder::ResizeCaches(size_t s)
   ForEachRule(bind(&BaseRule::CheckCacheSize, _4, s));
 }
 
+namespace
+{
 RulesHolder & rules(MapStyle mapStyle)
 {
-  size_t const index = static_cast<size_t>(mapStyle);
-  ASSERT_LESS(index, MapStyleCount, ());
   static RulesHolder h[MapStyleCount];
-  return h[index];
+  return h[mapStyle];
 }
+} // namespace
 
 RulesHolder & rules()
 {
@@ -210,14 +219,12 @@ namespace
       {
         m_line.set_color(r.color());
         m_line.set_width(r.width());
+        m_line.set_join(r.join());
+        m_line.set_cap(r.cap());
         if (r.has_dashdot())
           *(m_line.mutable_dashdot()) = r.dashdot();
         if (r.has_pathsym())
           *(m_line.mutable_pathsym()) = r.pathsym();
-        if (r.has_join())
-          m_line.set_join(r.join());
-        if (r.has_cap())
-          m_line.set_cap(r.cap());
       }
 
       virtual LineDefProto const * GetLine() const { return &m_line; }
@@ -238,8 +245,7 @@ namespace
     public:
       Symbol(SymbolRuleProto const & r) : m_symbol(r)
       {
-        if (r.has_apply_for_type())
-          SetType(r.apply_for_type());
+        SetType(r.apply_for_type());
       }
 
       virtual SymbolRuleProto const * GetSymbol() const { return &m_symbol; }
@@ -257,10 +263,10 @@ namespace
         , m_textTypePrimary(text_type_name)
         , m_textTypeSecondary(text_type_name)
       {
-        if (m_caption.primary().has_text())
+        if (!m_caption.primary().text().empty())
           m_textTypePrimary = GetTextType(m_caption.primary().text());
 
-        if (m_caption.has_secondary() && m_caption.secondary().has_text())
+        if (m_caption.has_secondary() && !m_caption.secondary().text().empty())
           m_textTypeSecondary = GetTextType(m_caption.secondary().text());
       }
 
@@ -292,15 +298,6 @@ namespace
 
     typedef CaptionT<CaptionRuleProto> Caption;
     typedef CaptionT<PathTextRuleProto> PathText;
-
-    class Circle : public BaseRule
-    {
-      CircleRuleProto m_circle;
-    public:
-      Circle(CircleRuleProto const & r) : m_circle(r) {}
-
-      virtual CircleRuleProto const * GetCircle() const { return &m_circle; }
-    };
 
     class Shield : public BaseRule
     {
@@ -442,9 +439,6 @@ namespace
           if (de.has_caption())
             AddRule<Caption>(p, de.scale(), caption, de.caption(), apply_if);
 
-          if (de.has_circle())
-            AddRule<Circle>(p, de.scale(), circle, de.circle(), apply_if);
-
           if (de.has_path_text())
             AddRule<PathText>(p, de.scale(), pathtext, de.path_text(), apply_if);
 
@@ -458,7 +452,7 @@ namespace
       m_names.pop_back();
     }
   };
-}
+} // namespace
 
 void RulesHolder::InitBackgroundColors(ContainerProto const & cont)
 {
@@ -487,11 +481,11 @@ void RulesHolder::InitBackgroundColors(ContainerProto const & cont)
         {
           // Take the color of the draw element
           AreaRuleProto const & rule = de.area();
-          if (rule.has_color())
+          if (rule.color() != 0)
           {
             bgColorDefault = rule.color();
 
-            if (de.has_scale())
+            if (de.scale() != 0)
               bgColorForScale.insert(make_pair(de.scale(), rule.color()));
           }
         }
@@ -511,6 +505,19 @@ void RulesHolder::InitBackgroundColors(ContainerProto const & cont)
   }
 }
 
+void RulesHolder::InitColors(ContainerProto const & cp)
+{
+  if (!cp.has_colors())
+    return;
+
+  ASSERT_EQUAL(m_colors.size(), 0, ());
+  for (int i = 0; i < cp.colors().value_size(); i++)
+  {
+    ColorElementProto const & proto = cp.colors().value(i);
+    m_colors.insert(std::make_pair(proto.name(), proto.color()));
+  }
+}
+
 void RulesHolder::LoadFromBinaryProto(string const & s)
 {
   Clean();
@@ -522,6 +529,7 @@ void RulesHolder::LoadFromBinaryProto(string const & s)
   classif().GetMutableRoot()->ForEachObject(ref(doSet));
 
   InitBackgroundColors(doSet.m_cont);
+  InitColors(doSet.m_cont);
 }
 
 void LoadRules()
@@ -531,4 +539,4 @@ void LoadRules()
   rules().LoadFromBinaryProto(buffer);
 }
 
-}
+} // namespace drule

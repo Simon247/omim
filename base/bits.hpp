@@ -1,9 +1,9 @@
 #pragma once
 #include "base/assert.hpp"
 
-#include "std/cstdint.hpp"
-#include "std/type_traits.hpp"
-
+#include <cstdint>
+#include <limits>
+#include <type_traits>
 
 namespace bits
 {
@@ -63,16 +63,14 @@ namespace bits
 
   inline uint32_t PopCount(uint64_t x) noexcept
   {
-    x = (x & 0x5555555555555555) + ((x & 0xAAAAAAAAAAAAAAAA) >> 1);
-    x = (x & 0x3333333333333333) + ((x & 0xCCCCCCCCCCCCCCCC) >> 2);
-    x = (x & 0x0F0F0F0F0F0F0F0F) + ((x & 0xF0F0F0F0F0F0F0F0) >> 4);
-    x = (x & 0x00FF00FF00FF00FF) + ((x & 0xFF00FF00FF00FF00) >> 8);
-    x = (x & 0x0000FFFF0000FFFF) + ((x & 0xFFFF0000FFFF0000) >> 16);
-    x = x + (x >> 32);
+    x = x - ((x & 0xAAAAAAAAAAAAAAAA) >> 1);
+    x = (x & 0x3333333333333333) + ((x >> 2) & 0x3333333333333333);
+    x = (x + (x >> 4)) & 0x0F0F0F0F0F0F0F0F;
+    x = (x * 0x0101010101010101) >> 56;
     return static_cast<uint32_t>(x);
   }
 
-  inline uint8_t CeilLog(uint64_t x) noexcept
+  inline uint8_t FloorLog(uint64_t x) noexcept
   {
 #define CHECK_RSH(x, msb, offset) \
     if (x >> offset)              \
@@ -112,16 +110,16 @@ namespace bits
     return (x << 1) | (x >> (sizeof(T) * 8 - 1));
   }
 
-  template <typename T> inline typename make_unsigned<T>::type ZigZagEncode(T x)
+  template <typename T> inline typename std::make_unsigned<T>::type ZigZagEncode(T x)
   {
-    static_assert(is_signed<T>::value, "Type should be signed");
+    static_assert(std::is_signed<T>::value, "Type should be signed");
     return (x << 1) ^ (x >> (sizeof(x) * 8 - 1));
   }
 
-  template <typename T> inline typename make_signed<T>::type ZigZagDecode(T x)
+  template <typename T> inline typename std::make_signed<T>::type ZigZagDecode(T x)
   {
-    static_assert(is_unsigned<T>::value, "Type should be unsigned.");
-    return (x >> 1) ^ -static_cast<typename make_signed<T>::type>(x & 1);
+    static_assert(std::is_unsigned<T>::value, "Type should be unsigned.");
+    return (x >> 1) ^ -static_cast<typename std::make_signed<T>::type>(x & 1);
   }
 
   inline uint32_t PerfectShuffle(uint32_t x)
@@ -201,4 +199,11 @@ namespace bits
     while (n != 0) { ++result; n >>= 1; }
     return result;
   }
-}
+
+  inline uint64_t GetFullMask(uint8_t numBits)
+  {
+    ASSERT_LESS_OR_EQUAL(numBits, 64, ());
+    return numBits == 64 ? std::numeric_limits<uint64_t>::max()
+                         : (static_cast<uint64_t>(1) << numBits) - 1;
+  }
+}  // namespace bits

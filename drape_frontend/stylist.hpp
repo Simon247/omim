@@ -1,6 +1,7 @@
 #pragma once
 
 #include "indexer/feature_data.hpp"
+#include "indexer/ftypes_matcher.hpp"
 #include "indexer/drawing_rule_def.hpp"
 
 #include "base/buffer_vector.hpp"
@@ -15,27 +16,47 @@ namespace drule { class BaseRule; }
 namespace df
 {
 
+class IsBuildingHasPartsChecker : public ftypes::BaseChecker
+{
+  IsBuildingHasPartsChecker();
+public:
+  static IsBuildingHasPartsChecker const & Instance();
+};
+
+class IsBuildingPartChecker : public ftypes::BaseChecker
+{
+  IsBuildingPartChecker();
+public:
+  static IsBuildingPartChecker const & Instance();
+};
+
+class IsHatchingTerritoryChecker : public ftypes::BaseChecker
+{
+  IsHatchingTerritoryChecker();
+public:
+  static IsHatchingTerritoryChecker const & Instance();
+};
+
 struct CaptionDescription
 {
   void Init(FeatureType const & f,
-            int const zoomLevel);
-
-  void FormatCaptions(FeatureType const & f,
-                      feature::EGeomType type,
-                      drule::text_type_t mainTextType,
-                      bool auxCaptionExists);
+            int8_t deviceLang,
+            int const zoomLevel,
+            feature::EGeomType const type,
+            drule::text_type_t const mainTextType,
+            bool const auxCaptionExists);
 
   string const & GetMainText() const;
   string const & GetAuxText() const;
   string const & GetRoadNumber() const;
-  string GetPathName() const;
   bool IsNameExists() const;
 
 private:
-  void SwapCaptions(int const zoomLevel);
-  void DiscardLongCaption(int const zoomLevel);
+  /// Clear aux name on high zoom and clear long main name on low zoom.
+  void ProcessZoomLevel(int const zoomLevel);
+  /// Try to use house number as name of the object.
+  void ProcessMainTextType(drule::text_type_t const & mainTextType);
 
-private:
   string m_mainText;
   string m_auxText;
   string m_roadNumber;
@@ -61,10 +82,11 @@ public:
   bool IsEmpty() const;
 
 private:
-  friend bool InitStylist(FeatureType const &,
-                          int const,
+  friend bool InitStylist(FeatureType const & f,
+                          int8_t deviceLang,
+                          int const zoomLevel,
                           bool buildings3d,
-                          Stylist &);
+                          Stylist & s);
 
   void RaiseCoastlineFlag();
   void RaiseAreaStyleFlag();
@@ -82,6 +104,7 @@ private:
 };
 
 bool InitStylist(FeatureType const & f,
+                 int8_t deviceLang,
                  int const zoomLevel,
                  bool buildings3d,
                  Stylist & s);

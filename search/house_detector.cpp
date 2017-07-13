@@ -1,7 +1,7 @@
 #include "house_detector.hpp"
 
 #include "search/algos.hpp"
-#include "search/search_common.hpp"
+#include "search/common.hpp"
 
 #include "indexer/classificator.hpp"
 #include "indexer/feature_impl.hpp"
@@ -15,6 +15,7 @@
 #include "base/stl_iterator.hpp"
 
 #include "std/bind.hpp"
+#include "std/exception.hpp"
 #include "std/numeric.hpp"
 #include "std/set.hpp"
 #include "std/string.hpp"
@@ -222,43 +223,6 @@ bool House::GetNearbyMatch(ParsedNumber const & number) const
   return m_number.IsIntersect(number, HN_NEARBY_DISTANCE);
 }
 
-FeatureLoader::FeatureLoader(Index const * pIndex)
-  : m_pIndex(pIndex), m_pGuard(0)
-{
-}
-
-FeatureLoader::~FeatureLoader()
-{
-  Free();
-}
-
-void FeatureLoader::CreateLoader(MwmSet::MwmId const & mwmId)
-{
-  if (m_pGuard == nullptr || mwmId != m_pGuard->GetId())
-  {
-    delete m_pGuard;
-    m_pGuard = new Index::FeaturesLoaderGuard(*m_pIndex, mwmId);
-  }
-}
-
-void FeatureLoader::Load(FeatureID const & id, FeatureType & f)
-{
-  CreateLoader(id.m_mwmId);
-  m_pGuard->GetFeatureByIndex(id.m_index, f);
-}
-
-void FeatureLoader::Free()
-{
-  delete m_pGuard;
-  m_pGuard = 0;
-}
-
-template <class ToDo>
-void FeatureLoader::ForEachInRect(m2::RectD const & rect, ToDo toDo)
-{
-  m_pIndex->ForEachInRect(toDo, rect, scales::GetUpperScale());
-}
-
 m2::RectD Street::GetLimitRect(double offsetMeters) const
 {
   m2::RectD rect;
@@ -329,8 +293,8 @@ void Street::SortHousesProjection()
   sort(m_houses.begin(), m_houses.end(), &LessStreetDistance);
 }
 
-HouseDetector::HouseDetector(Index const * pIndex)
-  : m_loader(pIndex), m_streetNum(0)
+HouseDetector::HouseDetector(Index const & index)
+  : m_loader(index), m_streetNum(0)
 {
   // default value for conversions
   SetMetres2Mercator(360.0 / 40.0E06);
@@ -463,7 +427,12 @@ int HouseDetector::LoadStreets(vector<FeatureID> const & ids)
       continue;
 
     FeatureType f;
-    m_loader.Load(ids[i], f);
+    if (!m_loader.Load(ids[i], f))
+    {
+      LOG(LWARNING, ("Can't read feature from:", ids[i].m_mwmId));
+      continue;
+    }
+
     if (f.GetFeatureType() == feature::GEOM_LINE)
     {
       // Use default name as a primary compare key for merging.
@@ -492,7 +461,7 @@ int HouseDetector::LoadStreets(vector<FeatureID> const & ids)
     }
   }
 
-  m_loader.Free();
+  m_loader.Reset();
   return count;
 }
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "search/v2/house_to_street_table.hpp"
+#include "search/house_to_street_table.hpp"
 
 #include "indexer/feature_decl.hpp"
 
@@ -82,15 +82,16 @@ public:
   void GetNearbyStreets(FeatureType & ft, vector<Street> & streets) const;
   //@}
 
-  /// @returns [a lot of] nearby feature's streets and feature's street index, if valid ( < vector.size()).
+  /// @returns [a lot of] nearby feature's streets and an index of a feature's street.
+  /// Returns a value greater than vector size when there are no Street the feature belongs to.
   /// @note returned vector can contain duplicated street segments.
   pair<vector<Street>, uint32_t> GetNearbyFeatureStreets(FeatureType & ft) const;
 
   /// @return The nearest exact address where building has house number and valid street match.
   void GetNearbyAddress(m2::PointD const & center, Address & addr) const;
-  /// @return The exact address for feature.
-  /// @precondition ft Should have house number.
-  bool GetExactAddress(FeatureType & ft, Address & addr) const;
+  /// @param addr (out) the exact address of a feature.
+  /// @returns false if  can't extruct address or ft have no house number.
+  bool GetExactAddress(FeatureType const & ft, Address & addr) const;
 
 private:
 
@@ -98,7 +99,7 @@ private:
   class HouseTable
   {
     Index const & m_index;
-    unique_ptr<search::v2::HouseToStreetTable> m_table;
+    unique_ptr<search::HouseToStreetTable> m_table;
     MwmSet::MwmHandle m_handle;
   public:
     explicit HouseTable(Index const & index) : m_index(index) {}
@@ -110,7 +111,7 @@ private:
   /// @return Sorted by distance houses vector with valid house number.
   void GetNearbyBuildings(m2::PointD const & center, vector<Building> & buildings) const;
 
-  static Building FromFeature(FeatureType & ft, double distMeters);
+  static Building FromFeature(FeatureType const & ft, double distMeters);
   static m2::RectD GetLookupRect(m2::PointD const & center, double radiusM);
 };
 

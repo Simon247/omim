@@ -1,21 +1,17 @@
 #import "MWMCircularProgress.h"
 #import "MWMCircularProgressView.h"
-
-namespace
-{
-UINib * const progressViewNib = [UINib nibWithNibName:@"MWMCircularProgress" bundle:[NSBundle mainBundle]];
-} // namespace
+#import "SwiftBridge.h"
 
 @interface MWMCircularProgressView ()
 
-@property (nonatomic) BOOL suspendRefreshProgress;
+@property(nonatomic) BOOL suspendRefreshProgress;
 
 @end
 
 @interface MWMCircularProgress ()
 
-@property (nonatomic) IBOutlet MWMCircularProgressView * rootView;
-@property (nonatomic) NSNumber * nextProgressToAnimate;
+@property(nonatomic) IBOutlet MWMCircularProgressView * rootView;
+@property(nonatomic) NSNumber * nextProgressToAnimate;
 
 @end
 
@@ -23,17 +19,17 @@ UINib * const progressViewNib = [UINib nibWithNibName:@"MWMCircularProgress" bun
 
 + (nonnull instancetype)downloaderProgressForParentView:(nonnull UIView *)parentView
 {
-  MWMCircularProgress * progress = [[MWMCircularProgress alloc] initWithParentView:parentView];
+  MWMCircularProgress * progress = [[self alloc] initWithParentView:parentView];
 
   progress.rootView.suspendRefreshProgress = YES;
 
-  [progress setImage:[UIImage imageNamed:@"ic_download"]
+  [progress setImageName:@"ic_download"
            forStates:{MWMCircularProgressStateNormal, MWMCircularProgressStateSelected}];
-  [progress setImage:[UIImage imageNamed:@"ic_close_spinner"]
+  [progress setImageName:@"ic_close_spinner"
            forStates:{MWMCircularProgressStateProgress, MWMCircularProgressStateSpinner}];
-  [progress setImage:[UIImage imageNamed:@"ic_download_error"]
+  [progress setImageName:@"ic_download_error"
            forStates:{MWMCircularProgressStateFailed}];
-  [progress setImage:[UIImage imageNamed:@"ic_check"]
+  [progress setImageName:@"ic_check"
            forStates:{MWMCircularProgressStateCompleted}];
 
   [progress setColoring:MWMButtonColoringBlack
@@ -52,7 +48,7 @@ UINib * const progressViewNib = [UINib nibWithNibName:@"MWMCircularProgress" bun
   self = [super init];
   if (self)
   {
-    [progressViewNib instantiateWithOwner:self options:nil];
+    [[[UINib alloc] init:[self class] bundle:nil] instantiateWithOwner:self options:nil];
     [parentView.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];
     [parentView addSubview:self.rootView];
     self.state = MWMCircularProgressStateNormal;
@@ -60,11 +56,7 @@ UINib * const progressViewNib = [UINib nibWithNibName:@"MWMCircularProgress" bun
   return self;
 }
 
-- (void)dealloc
-{
-  [self.rootView removeFromSuperview];
-}
-
+- (void)dealloc { [self.rootView removeFromSuperview]; }
 - (void)reset
 {
   _progress = 0.;
@@ -72,10 +64,20 @@ UINib * const progressViewNib = [UINib nibWithNibName:@"MWMCircularProgress" bun
   self.nextProgressToAnimate = nil;
 }
 
-- (void)setImage:(nonnull UIImage *)image forStates:(MWMCircularProgressStateVec const &)states
+- (void)setSpinnerColoring:(MWMImageColoring)coloring
+{
+  [self.rootView setSpinnerColoring:coloring];
+}
+
+- (void)setSpinnerBackgroundColor:(nonnull UIColor *)backgroundColor
+{
+  [self.rootView setSpinnerBackgroundColor:backgroundColor];
+}
+
+- (void)setImageName:(nonnull NSString *)imageName forStates:(MWMCircularProgressStateVec const &)states
 {
   for (auto const & state : states)
-    [self.rootView setImage:image forState:state];
+    [self.rootView setImageName:imageName forState:state];
 }
 
 - (void)setColor:(nonnull UIColor *)color forStates:(MWMCircularProgressStateVec const &)states
@@ -84,17 +86,14 @@ UINib * const progressViewNib = [UINib nibWithNibName:@"MWMCircularProgress" bun
     [self.rootView setColor:color forState:state];
 }
 
-- (void)setColoring:(MWMButtonColoring)coloring forStates:(MWMCircularProgressStateVec const &)states
+- (void)setColoring:(MWMButtonColoring)coloring
+          forStates:(MWMCircularProgressStateVec const &)states
 {
   for (auto const & state : states)
     [self.rootView setColoring:coloring forState:state];
 }
 
-- (void)setInvertColor:(BOOL)invertColor
-{
-  self.rootView.isInvertColor = invertColor;
-}
-
+- (void)setInvertColor:(BOOL)invertColor { self.rootView.isInvertColor = invertColor; }
 #pragma mark - Animation
 
 - (void)animationDidStop:(CABasicAnimation *)anim finished:(BOOL)flag
@@ -108,11 +107,7 @@ UINib * const progressViewNib = [UINib nibWithNibName:@"MWMCircularProgress" bun
 
 #pragma mark - Actions
 
-- (IBAction)buttonTouchUpInside:(UIButton *)sender
-{
-  [self.delegate progressButtonPressed:self];
-}
-
+- (IBAction)buttonTouchUpInside:(UIButton *)sender { [self.delegate progressButtonPressed:self]; }
 #pragma mark - Properties
 
 - (void)setProgress:(CGFloat)progress
@@ -130,8 +125,7 @@ UINib * const progressViewNib = [UINib nibWithNibName:@"MWMCircularProgress" bun
   }
   else
   {
-    dispatch_async(dispatch_get_main_queue(), ^
-    {
+    dispatch_async(dispatch_get_main_queue(), ^{
       [self.rootView animateFromValue:self->_progress toValue:progress];
       self->_progress = progress;
     });
@@ -140,16 +134,11 @@ UINib * const progressViewNib = [UINib nibWithNibName:@"MWMCircularProgress" bun
 
 - (void)setState:(MWMCircularProgressState)state
 {
-  dispatch_async(dispatch_get_main_queue(), ^
-  {
+  dispatch_async(dispatch_get_main_queue(), ^{
     [self reset];
     self.rootView.state = state;
   });
 }
 
-- (MWMCircularProgressState)state
-{
-  return self.rootView.state;
-}
-
+- (MWMCircularProgressState)state { return self.rootView.state; }
 @end

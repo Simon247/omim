@@ -2,18 +2,16 @@
 #include "drape_frontend/watch/proto_to_styles.hpp"
 
 #include "drape/symbols_texture.hpp"
+#include "drape/texture_manager.hpp"
 
 #include "platform/platform.hpp"
 
-#include "coding/png_memory_encoder.hpp"
 #include "coding/parse_xml.hpp"
 
 #include "indexer/drawing_rules.hpp"
 #include "indexer/map_style_reader.hpp"
 
 #include "base/logging.hpp"
-
-#include "3party/lodepng/lodepng_io.hpp"
 
 #include "3party/agg/agg_rasterizer_scanline_aa.h"
 #include "3party/agg/agg_scanline_p.h"
@@ -28,6 +26,8 @@
 
 #include "3party/agg/agg_vcgen_stroke.cpp"
 #include "3party/agg/agg_vcgen_dash.cpp"
+
+#include "3party/stb_image/stb_image_write.h"
 
 namespace df
 {
@@ -166,7 +166,8 @@ SoftwareRenderer::SoftwareRenderer(GlyphCache::Params const & glyphCacheParams, 
   pl.GetFontNames(fonts);
   m_glyphCache->addFonts(fonts);
 
-  VERIFY(dp::SymbolsTexture::DecodeToMemory(resourcesPostfix, m_symbolsSkin, m_symbolsIndex, m_skinWidth, m_skinHeight), ());
+  VERIFY(dp::SymbolsTexture::DecodeToMemory(resourcesPostfix, dp::kDefaultSymbolsTexture,
+                                            m_symbolsSkin, m_symbolsIndex, m_skinWidth, m_skinHeight), ());
   ASSERT_NOT_EQUAL(m_skinWidth, 0, ());
   ASSERT_NOT_EQUAL(m_skinHeight, 0, ());
 }
@@ -558,6 +559,16 @@ void SoftwareRenderer::DrawPathText(PathInfo const & geometry, dp::FontDecl cons
   l.render(face, ren);
 }
 
+namespace
+{
+void StbiWritePngFunc(void * context, void * data, int size)
+{
+  FrameImage * image = reinterpret_cast<FrameImage *>(context);
+  image->m_data.resize(size);
+  memcpy(image->m_data.data(), data, size);
+}
+} //  namespace
+
 void SoftwareRenderer::EndFrame(FrameImage & image)
 {
   ASSERT(m_frameWidth > 0 && m_frameHeight > 0, ());
@@ -566,7 +577,11 @@ void SoftwareRenderer::EndFrame(FrameImage & image)
   image.m_width = m_frameWidth;
   image.m_height = m_frameHeight;
 
-  il::EncodePngToMemory(m_frameWidth, m_frameHeight, m_frameBuffer, image.m_data);
+  uint8_t const  kComponentsCount = 4;
+  uint8_t const kBytesPerPixel = 4;
+  stbi_write_png_to_func(&StbiWritePngFunc, &image, m_frameWidth, m_frameHeight,
+                         kComponentsCount, m_frameBuffer.data(),
+                         m_frameWidth * kBytesPerPixel);
   m_frameWidth = 0;
   m_frameHeight = 0;
 }

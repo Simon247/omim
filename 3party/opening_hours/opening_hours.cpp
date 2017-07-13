@@ -277,6 +277,16 @@ std::ostream & operator<<(std::ostream & ost, Time const & time)
   return ost;
 }
 
+bool operator==(Time const & lhs, Time const & rhs)
+{
+  if (lhs.IsEmpty() && rhs.IsEmpty())
+    return true;
+
+  return lhs.GetType() == rhs.GetType() &&
+         lhs.GetHours() == rhs.GetHours() &&
+         lhs.GetMinutes() == rhs.GetMinutes();
+}
+
 // TimespanPeriod ----------------------------------------------------------------------------------
 TimespanPeriod::TimespanPeriod(HourMinutes const & hm):
     m_hourMinutes(hm),
@@ -301,6 +311,16 @@ std::ostream & operator<<(std::ostream & ost, TimespanPeriod const p)
   return ost;
 }
 
+bool operator==(TimespanPeriod const & lhs, TimespanPeriod const & rhs)
+{
+  if (lhs.IsEmpty() && rhs.IsEmpty())
+    return true;
+
+  return lhs.GetType() == rhs.GetType() &&
+         lhs.GetHourMinutes() == rhs.GetHourMinutes() &&
+         lhs.GetMinutes() == rhs.GetMinutes();
+}
+
 // Timespan ----------------------------------------------------------------------------------------
 bool Timespan::HasExtendedHours() const
 {
@@ -321,6 +341,14 @@ bool Timespan::HasExtendedHours() const
   return endHM.GetDuration() <= startHM.GetDuration();
 }
 
+void Timespan::ExpandPlus()
+{
+  if (HasPlus())
+  {
+    SetEnd(HourMinutes(24_h));
+  }
+}
+
 std::ostream & operator<<(std::ostream & ost, Timespan const & span)
 {
   ost << span.GetStart();
@@ -339,6 +367,25 @@ std::ostream & operator<<(std::ostream & ost, osmoh::TTimespans const & timespan
 {
   PrintVector(ost, timespans);
   return ost;
+}
+
+bool operator==(Timespan const & lhs, Timespan const & rhs)
+{
+  if (lhs.IsEmpty() && rhs.IsEmpty())
+    return true;
+
+  if (lhs.IsEmpty() != rhs.IsEmpty() ||
+      lhs.HasStart() != rhs.HasStart() ||
+      lhs.HasEnd() != rhs.HasEnd() ||
+      lhs.HasPlus() != rhs.HasPlus() ||
+      lhs.HasPeriod() != rhs.HasPeriod())
+  {
+    return false;
+  }
+
+  return lhs.GetStart() == rhs.GetStart() &&
+         lhs.GetEnd() == rhs.GetEnd() &&
+         lhs.GetPeriod() == lhs.GetPeriod();
 }
 
 // NthWeekdayOfTheMonthEntry -----------------------------------------------------------------------
@@ -768,6 +815,7 @@ bool OpeningHours::IsValid() const
 {
   return m_valid;
 }
+
 bool OpeningHours::IsTwentyFourHours() const
 {
   return m_rule.size() == 1 && m_rule[0].IsTwentyFourHours();
@@ -775,21 +823,21 @@ bool OpeningHours::IsTwentyFourHours() const
 
 bool OpeningHours::HasWeekdaySelector() const
 {
-  return std::any_of(begin(m_rule), end(m_rule), std::mem_fn(&osmoh::RuleSequence::HasWeekdays));
+  return std::any_of(m_rule.cbegin(), m_rule.cend(), std::mem_fn(&osmoh::RuleSequence::HasWeekdays));
 }
 
 bool OpeningHours::HasMonthSelector() const
 {
-  return std::any_of(begin(m_rule), end(m_rule), std::mem_fn(&osmoh::RuleSequence::HasMonths));
+  return std::any_of(m_rule.cbegin(), m_rule.cend(), std::mem_fn(&osmoh::RuleSequence::HasMonths));
 }
 
 bool OpeningHours::HasWeekSelector() const
 {
-  return std::any_of(begin(m_rule), end(m_rule), std::mem_fn(&osmoh::RuleSequence::HasWeeks));
+  return std::any_of(m_rule.cbegin(), m_rule.cend(), std::mem_fn(&osmoh::RuleSequence::HasWeeks));
 }
 
 bool OpeningHours::HasYearSelector() const
 {
-  return std::any_of(begin(m_rule), end(m_rule), std::mem_fn(&osmoh::RuleSequence::HasYears));
+  return std::any_of(m_rule.cbegin(), m_rule.cend(), std::mem_fn(&osmoh::RuleSequence::HasYears));
 }
 } // namespace osmoh

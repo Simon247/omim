@@ -1,7 +1,10 @@
 #include "generator/feature_builder.hpp"
 
-#include "routing/car_model.hpp"
-#include "routing/pedestrian_model.hpp"
+#include "routing/routing_helpers.hpp"
+
+#include "routing_common/bicycle_model.hpp"
+#include "routing_common/car_model.hpp"
+#include "routing_common/pedestrian_model.hpp"
 
 #include "indexer/feature_impl.hpp"
 #include "indexer/feature_visibility.hpp"
@@ -16,9 +19,8 @@
 #include "base/logging.hpp"
 #include "base/string_utils.hpp"
 
-#include "std/cstring.hpp"
-#include "std/algorithm.hpp"
-
+#include <algorithm>
+#include <cstring>
 
 using namespace feature;
 
@@ -77,17 +79,17 @@ void FeatureBuilder1::SetRank(uint8_t rank)
   m_params.rank = rank;
 }
 
-void FeatureBuilder1::SetTestId(uint64_t id)
-{
-  m_params.GetMetadata().Set(Metadata::FMD_TEST_ID, strings::to_string(id));
-}
-
-void FeatureBuilder1::AddHouseNumber(string const & houseNumber)
+void FeatureBuilder1::AddHouseNumber(std::string const & houseNumber)
 {
   m_params.AddHouseNumber(houseNumber);
 }
 
-void FeatureBuilder1::AddStreet(string const & streetName) { m_params.AddStreet(streetName); }
+void FeatureBuilder1::AddStreet(std::string const & streetName) { m_params.AddStreet(streetName); }
+
+void FeatureBuilder1::AddPostcode(std::string const & postcode)
+{
+  m_params.GetMetadata().Set(Metadata::FMD_POSTCODE, postcode);
+}
 
 void FeatureBuilder1::AddPoint(m2::PointD const & p)
 {
@@ -104,7 +106,7 @@ void FeatureBuilder1::SetLinear(bool reverseGeometry)
   {
     auto & cont = m_polygons.front();
     ASSERT(!cont.empty(), ());
-    reverse(cont.begin(), cont.end());
+    std::reverse(cont.begin(), cont.end());
   }
 }
 
@@ -167,7 +169,7 @@ bool FeatureBuilder1::RemoveInvalidTypes()
                                         m_params.IsEmptyNames());
 }
 
-bool FeatureBuilder1::FormatFullAddress(string & res) const
+bool FeatureBuilder1::FormatFullAddress(std::string & res) const
 {
   return m_params.FormatFullAddress(m_limitRect.Center(), res);
 }
@@ -183,7 +185,7 @@ FeatureBase FeatureBuilder1::GetFeatureBase() const
   memcpy(f.m_types, &m_params.m_Types[0], sizeof(uint32_t) * m_params.m_Types.size());
   f.m_limitRect = m_limitRect;
 
-  f.m_bTypesParsed = f.m_bCommonParsed = true;
+  f.m_typesParsed = f.m_commonParsed = true;
 
   return f;
 }
@@ -224,8 +226,7 @@ namespace
 
 bool FeatureBuilder1::IsRoad() const
 {
-  static routing::PedestrianModel const pedModel;
-  return routing::CarModel::Instance().IsRoad(m_params.m_Types) || pedModel.IsRoad(m_params.m_Types);
+  return routing::IsRoad(m_params.m_Types);
 }
 
 bool FeatureBuilder1::PreSerialize()
@@ -463,6 +464,25 @@ osm::Id FeatureBuilder1::GetLastOsmId() const
   return m_osmIds.back();
 }
 
+osm::Id FeatureBuilder1::GetMostGenericOsmId() const
+{
+  ASSERT(!m_osmIds.empty(), ());
+  auto result = m_osmIds.front();
+  for (auto const & id : m_osmIds)
+  {
+    if (id.IsRelation())
+    {
+      result = id;
+      break;
+    }
+    else if (result.IsNode() && id.IsWay())
+    {
+      result = id;
+    }
+  }
+  return result;
+}
+
 bool FeatureBuilder1::HasOsmId(osm::Id const & id) const
 {
   for (auto const & cid : m_osmIds)
@@ -471,7 +491,7 @@ bool FeatureBuilder1::HasOsmId(osm::Id const & id) const
   return false;
 }
 
-string FeatureBuilder1::GetOsmIdsString() const
+std::string FeatureBuilder1::GetOsmIdsString() const
 {
   if (m_osmIds.empty())
     return "(NOT AN OSM FEATURE)";
@@ -490,14 +510,14 @@ int FeatureBuilder1::GetMinFeatureDrawScale() const
   return (minScale == -1 ? 1000 : minScale);
 }
 
-bool FeatureBuilder1::AddName(string const & lang, string const & name)
+bool FeatureBuilder1::AddName(std::string const & lang, std::string const & name)
 {
   return m_params.AddName(lang, name);
 }
 
-string FeatureBuilder1::GetName(int8_t lang) const
+std::string FeatureBuilder1::GetName(int8_t lang) const
 {
-  string s;
+  std::string s;
   VERIFY(m_params.name.GetString(lang, s) != s.empty(), ());
   return s;
 }
@@ -510,7 +530,7 @@ size_t FeatureBuilder1::GetPointsCount() const
   return counter;
 }
 
-string DebugPrint(FeatureBuilder1 const & f)
+std::string DebugPrint(FeatureBuilder1 const & f)
 {
   ostringstream out;
 
@@ -549,7 +569,7 @@ uint64_t FeatureBuilder1::GetWayIDForRouting() const
   return 0;
 }
 
-string DebugPrint(FeatureBuilder2 const & f)
+std::string DebugPrint(FeatureBuilder2 const & f)
 {
   return DebugPrint(static_cast<FeatureBuilder1 const &>(f));
 }
@@ -634,7 +654,7 @@ void FeatureBuilder2::Serialize(SupportingData & data, serial::CodingParams cons
       serial::SavePoint(sink, GetOuterGeometry()[0], params);
 
       // offsets was pushed from high scale index to low
-      reverse(data.m_ptsOffset.begin(), data.m_ptsOffset.end());
+      std::reverse(data.m_ptsOffset.begin(), data.m_ptsOffset.end());
       serial::WriteVarUintArray(data.m_ptsOffset, sink);
     }
   }
@@ -645,7 +665,7 @@ void FeatureBuilder2::Serialize(SupportingData & data, serial::CodingParams cons
     else
     {
       // offsets was pushed from high scale index to low
-      reverse(data.m_trgOffset.begin(), data.m_trgOffset.end());
+      std::reverse(data.m_trgOffset.begin(), data.m_trgOffset.end());
       serial::WriteVarUintArray(data.m_trgOffset, sink);
     }
   }

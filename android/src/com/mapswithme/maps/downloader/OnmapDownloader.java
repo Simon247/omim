@@ -16,6 +16,7 @@ import com.mapswithme.maps.background.Notifier;
 import com.mapswithme.maps.location.LocationHelper;
 import com.mapswithme.maps.routing.RoutingController;
 import com.mapswithme.maps.widget.WheelProgressView;
+import com.mapswithme.util.Config;
 import com.mapswithme.util.ConnectionState;
 import com.mapswithme.util.StringUtils;
 import com.mapswithme.util.UiUtils;
@@ -51,7 +52,7 @@ public class OnmapDownloader implements MwmActivity.LeftAnimationTrackListener
           continue;
 
         if (item.newStatus == CountryItem.STATUS_FAILED)
-          MapManager.showError(mActivity, item);
+          MapManager.showError(mActivity, item, null);
 
         if (mCurrentCountry.id.equals(item.countryId))
         {
@@ -100,14 +101,14 @@ public class OnmapDownloader implements MwmActivity.LeftAnimationTrackListener
 
       if (showFrame)
       {
-        boolean hasParent = !TextUtils.isEmpty(mCurrentCountry.directParentName);
+        boolean hasParent = !CountryItem.isRoot(mCurrentCountry.topmostParentId);
 
         UiUtils.showIf(progress || enqueued, mProgress);
         UiUtils.showIf(!progress && !enqueued, mButton);
         UiUtils.showIf(hasParent, mParent);
 
         if (hasParent)
-          mParent.setText(mCurrentCountry.directParentName);
+          mParent.setText(mCurrentCountry.topmostParentName);
 
         mTitle.setText(mCurrentCountry.name);
 
@@ -131,6 +132,7 @@ public class OnmapDownloader implements MwmActivity.LeftAnimationTrackListener
             sizeText = (MapManager.nativeIsLegacyMode() ? "" : StringUtils.getFileSizeString(mCurrentCountry.totalSize));
 
             if (shouldAutoDownload &&
+                Config.isAutodownloadEnabled() &&
                 !sAutodownloadLocked &&
                 !failed &&
                 !MapManager.nativeIsLegacyMode() &&
@@ -140,7 +142,8 @@ public class OnmapDownloader implements MwmActivity.LeftAnimationTrackListener
               if (loc != null)
               {
                 String country = MapManager.nativeFindCountry(loc.getLatitude(), loc.getLongitude());
-                if (TextUtils.equals(mCurrentCountry.id, country))
+                if (TextUtils.equals(mCurrentCountry.id, country) &&
+                    MapManager.nativeHasSpaceToDownloadCountry(country))
                 {
                   MapManager.nativeDownload(mCurrentCountry.id);
 
@@ -174,7 +177,7 @@ public class OnmapDownloader implements MwmActivity.LeftAnimationTrackListener
     mSize = (TextView)mFrame.findViewById(R.id.downloader_size);
 
     View controls = mFrame.findViewById(R.id.downloader_controls_frame);
-    mProgress = (WheelProgressView) controls.findViewById(R.id.downloader_progress);
+    mProgress = (WheelProgressView) controls.findViewById(R.id.wheel_downloader_progress);
     mButton = (Button) controls.findViewById(R.id.downloader_button);
 
     mProgress.setOnClickListener(new View.OnClickListener()
@@ -185,7 +188,7 @@ public class OnmapDownloader implements MwmActivity.LeftAnimationTrackListener
         MapManager.nativeCancel(mCurrentCountry.id);
         Statistics.INSTANCE.trackEvent(Statistics.EventName.DOWNLOADER_CANCEL,
                                        Statistics.params().add(Statistics.EventParam.FROM, "map"));
-        lockAutodownload();
+        setAutodownloadLocked(true);
       }
     });
 
@@ -200,11 +203,14 @@ public class OnmapDownloader implements MwmActivity.LeftAnimationTrackListener
           return;
         }
 
-        MapManager.warnDownloadOn3g(mActivity, new Runnable()
+        MapManager.warnOn3g(mActivity, mCurrentCountry.id, new Runnable()
         {
           @Override
           public void run()
           {
+            if (mCurrentCountry == null)
+              return;
+
             boolean retry = (mCurrentCountry.status == CountryItem.STATUS_FAILED);
             if (retry)
             {
@@ -247,19 +253,21 @@ public class OnmapDownloader implements MwmActivity.LeftAnimationTrackListener
     {
       MapManager.nativeUnsubscribe(mStorageSubscriptionSlot);
       mStorageSubscriptionSlot = 0;
+      MapManager.nativeUnsubscribeOnCountryChanged();
     }
-
-    MapManager.nativeUnsubscribeOnCountryChanged();
   }
 
   public void onResume()
   {
-    mStorageSubscriptionSlot = MapManager.nativeSubscribe(mStorageCallback);
-    MapManager.nativeSubscribeOnCountryChanged(mCountryChangedListener);
+    if (mStorageSubscriptionSlot == 0)
+    {
+      mStorageSubscriptionSlot = MapManager.nativeSubscribe(mStorageCallback);
+      MapManager.nativeSubscribeOnCountryChanged(mCountryChangedListener);
+    }
   }
 
-  static void lockAutodownload()
+  public static void setAutodownloadLocked(boolean locked)
   {
-    sAutodownloadLocked = true;
+    sAutodownloadLocked = locked;
   }
 }

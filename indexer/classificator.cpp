@@ -121,13 +121,14 @@ void ClassifObject::ConcatChildNames(string & s) const
 // Classificator implementation
 /////////////////////////////////////////////////////////////////////////////////////////
 
+namespace
+{
 Classificator & classif(MapStyle mapStyle)
 {
-  size_t const index = static_cast<size_t>(mapStyle);
-  ASSERT_LESS(index, MapStyleCount, ());
   static Classificator c[MapStyleCount];
-  return c[index];
+  return c[mapStyle];
 }
+} // namespace
 
 Classificator & classif()
 {
@@ -136,8 +137,8 @@ Classificator & classif()
 
 namespace ftype
 {
-  uint8_t const bits_count = 6;
-  uint8_t const levels_count = 5;
+  uint8_t const bits_count = 7;
+  uint8_t const levels_count = 4;
   uint8_t const max_value = (1 << bits_count) - 1;
 
   void set_value(uint32_t & type, uint8_t level, uint8_t value)
@@ -195,8 +196,6 @@ namespace ftype
 
   bool GetValue(uint32_t type, uint8_t level, uint8_t & value)
   {
-    ASSERT ( level < levels_count, ("invalid input level", level) );
-
     if (level < get_control_level(type))
     {
       value = get_value(type, level);
@@ -238,7 +237,7 @@ namespace ftype
   {
     return get_control_level(type);
   }
-}
+} // namespace ftype
 
 namespace
 {
@@ -280,7 +279,7 @@ namespace
         add_rule(ft, i++);
     }
   };
-}
+} // namespace
 
 void ClassifObject::GetSuitable(int scale, feature::EGeomType ft, drule::KeysT & keys) const
 {

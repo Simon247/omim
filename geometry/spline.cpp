@@ -15,9 +15,9 @@ Spline::Spline(vector<PointD> const & path)
   m_direction = vector<PointD>(cnt);
   m_length = vector<double>(cnt);
 
-  for(int i = 0; i < cnt; ++i)
+  for(size_t i = 0; i < cnt; ++i)
   {
-    m_direction[i] = path[i+1] - path[i];
+    m_direction[i] = path[i + 1] - path[i];
     m_length[i] = m_direction[i].Length();
     m_direction[i] = m_direction[i].Normalize();
   }
@@ -35,11 +35,9 @@ void Spline::AddPoint(PointD const & pt)
 {
   /// TODO remove this check when fix generator.
   /// Now we have line objects with zero length segments
+  /// https://jira.mail.ru/browse/MAPSME-3561
   if (!IsEmpty() && (pt - m_position.back()).IsAlmostZero())
-  {
-    LOG(LDEBUG, ("Found seqment with zero lenth (the ended points are same)"));
     return;
-  }
 
   if(IsEmpty())
     m_position.push_back(pt);
@@ -92,6 +90,14 @@ bool Spline::IsEmpty() const
 bool Spline::IsValid() const
 {
   return m_position.size() > 1;
+}
+
+Spline::iterator Spline::GetPoint(double step) const
+{
+  iterator it;
+  it.Attach(*this);
+  it.Advance(step);
+  return it;
 }
 
 Spline const & Spline::operator = (Spline const & spl)
@@ -183,7 +189,7 @@ double Spline::iterator::GetDistance() const
   return m_dist;
 }
 
-int Spline::iterator::GetIndex() const
+size_t Spline::iterator::GetIndex() const
 {
   return m_index;
 }
@@ -193,10 +199,8 @@ void Spline::iterator::AdvanceBackward(double step)
   m_dist += step;
   while(m_dist < 0.0f)
   {
-    m_index--;
-    if (m_index < 0)
+    if (m_index == 0)
     {
-      m_index = 0;
       m_checker = true;
       m_pos = m_spl->m_position[m_index];
       m_dir = m_spl->m_direction[m_index];
@@ -204,6 +208,8 @@ void Spline::iterator::AdvanceBackward(double step)
       m_dist = 0.0;
       return;
     }
+
+    --m_index;
 
     m_dist += m_spl->m_length[m_index];
   }
@@ -287,9 +293,13 @@ Spline * SharedSpline::operator->()
 
 Spline const * SharedSpline::operator->() const
 {
+  return Get();
+}
+
+Spline const * SharedSpline::Get() const
+{
   ASSERT(!IsNull(), ());
   return m_spline.get();
 }
-
 }
 

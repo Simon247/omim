@@ -2,7 +2,7 @@
 
 #include "base/assert.hpp"
 
-#include "std/sstream.hpp"
+#include <sstream>
 
 
 namespace osm
@@ -38,12 +38,22 @@ uint64_t Id::OsmId() const
   return m_encodedId & RESET;
 }
 
+bool Id::IsNode() const
+{
+  return ((m_encodedId & NODE) == NODE);
+}
+
 bool Id::IsWay() const
 {
   return ((m_encodedId & WAY) == WAY);
 }
 
-string Id::Type() const
+bool Id::IsRelation() const
+{
+  return ((m_encodedId & RELATION) == RELATION);
+}
+
+std::string Id::Type() const
 {
   if ((m_encodedId & RELATION) == RELATION)
     return "relation";
@@ -55,9 +65,9 @@ string Id::Type() const
     return "ERROR: Not initialized Osm ID";
 }
 
-string DebugPrint(osm::Id const & id)
+std::string DebugPrint(osm::Id const & id)
 {
-  ostringstream stream;
+  std::ostringstream stream;
   stream << id.Type() << " " << id.OsmId();
   return stream.str();
 }

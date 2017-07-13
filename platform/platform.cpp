@@ -4,7 +4,6 @@
 #include "coding/base64.hpp"
 #include "coding/file_name_utils.hpp"
 #include "coding/internal/file_data.hpp"
-#include "coding/sha2.hpp"
 #include "coding/writer.hpp"
 
 #include "base/logging.hpp"
@@ -87,6 +86,11 @@ bool Platform::RmDirRecursively(string const & dirName)
   return res;
 }
 
+void Platform::SetSettingsDirForTests(string const & path)
+{
+  m_settingsDir = my::AddSlashIfNeeded(path);
+}
+
 string Platform::ReadPathForFile(string const & file, string searchScope) const
 {
   if (searchScope.empty())
@@ -110,19 +114,6 @@ string Platform::ReadPathForFile(string const & file, string searchScope) const
   string const possiblePaths = m_writableDir  + "\n" + m_resourcesDir + "\n" + m_settingsDir;
   MYTHROW(FileAbsentException, ("File", file, "doesn't exist in the scope", searchScope,
                                 "Have been looking in:\n", possiblePaths));
-}
-
-string Platform::HashUniqueID(string const & s)
-{
-  // generate sha2 hash for UUID
-  string const hash = sha2::digest256(s, false);
-  // xor it
-  size_t const offset = hash.size() / 4;
-  string xoredHash;
-  for (size_t i = 0; i < offset; ++i)
-    xoredHash.push_back(hash[i] ^ hash[i + offset] ^ hash[i + offset * 2] ^ hash[i + offset * 3]);
-  // and use base64 encoding
-  return base64_for_user_ids::encode(xoredHash);
 }
 
 string Platform::ResourcesMetaServerUrl() const
@@ -187,6 +178,15 @@ void Platform::GetFilesByType(string const & directory, unsigned typeMask,
   }
 }
 
+// static
+bool Platform::IsDirectory(string const & path)
+{
+  EFileType fileType;
+  if (GetFileType(path, fileType) != ERR_OK)
+    return false;
+  return fileType == FILE_TYPE_DIRECTORY;
+}
+
 string Platform::DeviceName() const
 {
   return OMIM_OS_NAME;
@@ -225,5 +225,15 @@ string DebugPrint(Platform::EError err)
     return "Too many symbolic links were encountered in translating path.";
   case Platform::ERR_IO_ERROR: return "An I/O error occurred.";
   case Platform::ERR_UNKNOWN: return "Unknown";
+  }
+}
+
+string DebugPrint(Platform::ChargingStatus status)
+{
+  switch (status)
+  {
+  case Platform::ChargingStatus::Unknown: return "Unknown";
+  case Platform::ChargingStatus::Plugged: return "Plugged";
+  case Platform::ChargingStatus::Unplugged: return "Unplugged";
   }
 }

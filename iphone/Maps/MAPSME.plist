@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>Pushwoosh_APPID</key>
+	<string>84E00-0F767</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
@@ -63,6 +65,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>mapswithme</string>
+				<string>mapsme</string>
 				<string>ge0</string>
 				<string>geo</string>
 				<string>fb185237551520383</string>
@@ -71,7 +74,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>${CURRENT_PROJECT_VERSION}</string>
+	<string>0</string>
 	<key>Fabric</key>
 	<dict>
 		<key>APIKey</key>
@@ -96,11 +99,11 @@
 		<string>fb-messenger-api</string>
 		<string>fbauth2</string>
 		<string>fbshareextension</string>
+		<string>uber</string>
+		<string>yandextaxi</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>LocalNotificationsFileName</key>
-	<string>LocalNotifications</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -144,8 +147,14 @@
 			</dict>
 		</dict>
 	</dict>
-	<key>NSLocationAlwaysUsageDescription</key>
-	<string></string>
+	<key>NSCameraUsageDescription</key>
+	<string>Unused by an application</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Unused by an application</string>
+	<key>PW_USE_GPS</key>
+	<false/>
+	<key>Pushwoosh_LOG_LEVEL</key>
+	<string>WARNING</string>
 	<key>UIApplicationShortcutItems</key>
 	<array>
 		<dict>
@@ -175,6 +184,7 @@
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>
+		<string>audio</string>
 		<string>fetch</string>
 		<string>location</string>
 		<string>remote-notification</string>
@@ -184,7 +194,7 @@
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
-	<string>Mapsme</string>
+	<string>Main</string>
 	<key>UIPrerenderedIcon</key>
 	<true/>
 	<key>UIStatusBarHidden</key>

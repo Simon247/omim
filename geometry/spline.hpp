@@ -28,7 +28,7 @@ public:
     double GetLength() const;
     double GetFullLength() const;
 
-    int GetIndex() const;
+    size_t GetIndex() const;
 
   private:
     friend class Spline;
@@ -40,7 +40,7 @@ public:
   private:
     bool m_checker;
     Spline const * m_spl;
-    int m_index;
+    size_t m_index;
     double m_dist;
   };
 
@@ -56,6 +56,8 @@ public:
   size_t GetSize() const;
   vector<PointD> const & GetPath() const { return m_position; }
 
+  iterator GetPoint(double step) const;
+
   template <typename TFunctor>
   void ForEachNode(iterator const & begin, iterator const & end, TFunctor & f) const
   {
@@ -64,7 +66,7 @@ public:
 
     f(begin.m_pos);
 
-    for (int i = begin.GetIndex() + 1; i <= end.GetIndex(); ++i)
+    for (size_t i = begin.GetIndex() + 1; i <= end.GetIndex(); ++i)
       f(m_position[i]);
 
     f(end.m_pos);
@@ -97,6 +99,8 @@ public:
 
   Spline * operator->();
   Spline const * operator->() const;
+
+  Spline const * Get() const;
 
 private:
   shared_ptr<Spline> m_spline;

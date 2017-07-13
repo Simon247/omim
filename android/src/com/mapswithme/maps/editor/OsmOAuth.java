@@ -1,13 +1,14 @@
 package com.mapswithme.maps.editor;
 
 import android.support.annotation.IntDef;
-import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.annotation.Size;
 import android.support.annotation.WorkerThread;
-import android.text.TextUtils;
+
+import java.lang.ref.WeakReference;
 
 import com.mapswithme.maps.MwmApplication;
+import com.mapswithme.maps.editor.data.UserStats;
 
 public final class OsmOAuth
 {
@@ -42,6 +43,31 @@ public final class OsmOAuth
 
   private static final String PREF_OSM_TOKEN = "OsmToken";
   private static final String PREF_OSM_SECRET = "OsmSecret";
+  private static final String PREF_OSM_USERNAME = "OsmUsername";
+
+  public interface OnUserStatsChanged
+  {
+    void onStatsChange(UserStats stats);
+  }
+
+  private static WeakReference<OnUserStatsChanged> sListener;
+
+  public static void setUserStatsListener(OnUserStatsChanged listener)
+  {
+    sListener = new WeakReference<>(listener);
+  }
+
+  // Called from native OsmOAuth.cpp.
+  @SuppressWarnings("unused")
+  public static void onUserStatsUpdated(UserStats stats)
+  {
+    if (sListener == null)
+      return;
+
+    OnUserStatsChanged listener = sListener.get();
+    if (listener != null)
+      listener.onStatsChange(stats);
+  }
 
   public static final String URL_PARAM_VERIFIER = "oauth_verifier";
 
@@ -61,11 +87,17 @@ public final class OsmOAuth
     return MwmApplication.prefs().getString(PREF_OSM_SECRET, "");
   }
 
-  public static void setAuthorization(String token, String secret)
+  public static String getUsername()
+  {
+    return MwmApplication.prefs().getString(PREF_OSM_USERNAME, "");
+  }
+
+  public static void setAuthorization(String token, String secret, String username)
   {
     MwmApplication.prefs().edit()
                   .putString(PREF_OSM_TOKEN, token)
                   .putString(PREF_OSM_SECRET, secret)
+                  .putString(PREF_OSM_USERNAME, username)
                   .apply();
   }
 
@@ -74,6 +106,7 @@ public final class OsmOAuth
     MwmApplication.prefs().edit()
                   .remove(PREF_OSM_TOKEN)
                   .remove(PREF_OSM_SECRET)
+                  .remove(PREF_OSM_USERNAME)
                   .apply();
   }
 
@@ -100,7 +133,7 @@ public final class OsmOAuth
   @WorkerThread
   @Size(2)
   @Nullable
-  public static native String[] nativeAuthWithWebviewToken(String secret, String token, String verifier);
+  public static native String[] nativeAuthWithWebviewToken(String key, String secret, String verifier);
 
   /**
    * @return url for web auth, and token with secret for finishing authorization later
@@ -115,4 +148,10 @@ public final class OsmOAuth
   @Size(3)
   @Nullable
   public static native String[] nativeGetGoogleAuthUrl();
+
+  @WorkerThread
+  @Nullable
+  public static native String nativeGetOsmUsername(String token, String secret);
+
+  public static native void nativeUpdateOsmUserStats(String username, boolean forceUpdate);
 }

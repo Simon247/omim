@@ -4,6 +4,8 @@
 
 #include "geometry/mercator.hpp"
 
+#include "std/limits.hpp"
+
 using namespace routing;
 
 namespace
@@ -11,8 +13,8 @@ namespace
   UNIT_TEST(StrangeCaseInAfrica)
   {
     integration::CalculateRouteAndTestRouteLength(
-        integration::GetOsrmComponents(), MercatorBounds::FromLatLon(19.207890000000002573, 30.506630000000001246), {0., 0.},
-        MercatorBounds::FromLatLon(19.172889999999998878, 30.473150000000000404), 7250.);
+        integration::GetOsrmComponents(), MercatorBounds::FromLatLon(19.20789, 30.50663), {0., 0.},
+        MercatorBounds::FromLatLon(19.17289, 30.47315), 10283.7);
   }
 
   UNIT_TEST(MoscowShortRoadUnpacking)
@@ -121,11 +123,25 @@ namespace
                                                   {37.40993977728661, 67.644784047393685}, 14296.);
   }
 
+  UNIT_TEST(NederlandLeeuwardenToDenOeverTest)
+  {
+    integration::CalculateRouteAndTestRouteLength(integration::GetOsrmComponents(),
+                                                  MercatorBounds::FromLatLon(53.2076, 5.7082), {0., 0.},
+                                                  MercatorBounds::FromLatLon(52.9337, 5.0308), 59500.);
+  }
+
   UNIT_TEST(RussiaMoscowGerPanfilovtsev22SolodchaPravdiRouteTest)
   {
     integration::CalculateRouteAndTestRouteLength(
         integration::GetOsrmComponents(), {37.409929478750627, 67.644798619710073}, {0., 0.},
         {39.836562407458047, 65.774372510437971}, 239426.);
+  }
+
+  UNIT_TEST(RussiaMoscowBelarusMinsk)
+  {
+    integration::CalculateRouteAndTestRouteLength(integration::GetOsrmComponents(),
+                                                  MercatorBounds::FromLatLon(55.750650, 37.617673), {0., 0.},
+                                                  MercatorBounds::FromLatLon(53.902114, 27.562020), 712649.0);
   }
 
   // TODO OSRM offers a possible turn to a pedestrian road in this test. It's fixing right now.
@@ -259,6 +275,51 @@ namespace
     IRouter::ResultCode const result = routeResult.second;
     TEST_EQUAL(result, IRouter::NoError, ());
 
-    integration::TestRouteTime(route, 900.);
+    integration::TestRouteTime(route, 745.);
   }
+
+  UNIT_TEST(RussiaMoscowLenigradskiy39GeroevPanfilovtsev22SubrouteTest)
+  {
+    TRouteResult const routeResult = integration::CalculateRoute(
+      integration::GetOsrmComponents(), MercatorBounds::FromLatLon(55.7971, 37.53804), {0., 0.},
+      MercatorBounds::FromLatLon(55.8579, 37.40990));
+
+    IRouter::ResultCode const result = routeResult.second;
+    TEST_EQUAL(result, IRouter::NoError, ());
+
+    Route const & route = *routeResult.first;
+    TEST_EQUAL(route.GetSubrouteCount(), 1, ());
+    vector<RouteSegment> info;
+    route.GetSubrouteInfo(0, info);
+    TEST_EQUAL(info.size(), 336, ());
+  }
+
+  UNIT_TEST(USALosAnglesAriaTwentyninePalmsHighwayTimeTest)
+  {
+    TRouteResult const routeResult = integration::CalculateRoute(
+      integration::GetOsrmComponents(), MercatorBounds::FromLatLon(34.0739, -115.3212), {0.0, 0.0},
+      MercatorBounds::FromLatLon(34.0928, -115.5930));
+    Route const & route = *routeResult.first;
+    IRouter::ResultCode const result = routeResult.second;
+    TEST_EQUAL(result, IRouter::NoError, ());
+    TEST_LESS(route.GetTotalTimeSec(), numeric_limits<uint32_t>::max() / 2, ());
+  }
+
+  // There are road ids in osrm which don't have appropriate features ids in mwm.
+  // When the route goes through such osrm id a code line with LOG(LERROR, ...) is executed
+  // on route reconstruction stage. As a result some items of |segments| vector could have an empty
+  // |m_path|. This test shows such case.
+  //  UNIT_TEST(RussiaSpbPloschadBekhterevaToKomendantskiyProspekt)
+  //  {
+  //    TRouteResult const routeResult = integration::CalculateRoute(
+  //        integration::GetOsrmComponents(), MercatorBounds::FromLatLon(59.90126, 30.39970), {0.,
+  //        0.},
+  //        MercatorBounds::FromLatLon(60.02499, 30.23889));
+
+  //    Route const & route = *routeResult.first;
+  //    IRouter::ResultCode const result = routeResult.second;
+  //    TEST_EQUAL(result, IRouter::NoError, ());
+
+  //    integration::TestRouteTime(route, 1364.0);
+  //  }
 }  // namespace

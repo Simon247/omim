@@ -49,7 +49,7 @@ Font::Font(ReaderPtr<Reader> const & fontReader) : m_fontReader(fontReader)
 {
   m_fontStream = new FT_StreamRec;
   m_fontStream->base = 0;
-  m_fontStream->size = m_fontReader.Size();
+  m_fontStream->size = static_cast<unsigned long>(m_fontReader.Size());
   m_fontStream->pos = 0;
   m_fontStream->descriptor.pointer = &m_fontReader;
   m_fontStream->pathname.pointer = 0;
@@ -246,7 +246,7 @@ void GlyphCacheImpl::addFont(char const * fileName)
     while (ubIt != m_unicodeBlocks.end())
     {
       ASSERT ( ccIt != charcodes.end(), () );
-      if (ubIt->hasSymbol(*ccIt))
+      if (ubIt->hasSymbol(static_cast<strings::UniChar>(*ccIt)))
         break;
       ++ubIt;
     }
@@ -278,12 +278,15 @@ void GlyphCacheImpl::addFont(char const * fileName)
           }
           // weight used for sorting are boosted to the top.
           // the order of elements are saved by adding 'i' value as a shift.
-          ubIt->m_coverage.back() = ubIt->m_end + 1 - ubIt->m_start + i + 1;
+          ubIt->m_coverage.back() = static_cast<int>(ubIt->m_end + 1 - ubIt->m_start + i + 1);
         }
     }
 
-    if ((ubIt->m_coverage.back() >= 0) && (ubIt->m_coverage.back() < ubIt->m_end + 1 - ubIt->m_start))
+    if ((ubIt->m_coverage.back() >= 0) &&
+        (static_cast<strings::UniChar>(ubIt->m_coverage.back()) < ubIt->m_end + 1 - ubIt->m_start))
+    {
       ++ubIt->m_coverage.back();
+    }
     ++ccIt;
   }
 
